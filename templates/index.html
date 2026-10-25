@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>AnimatrónicoOS — Panel de Control</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="theme-color" content="#00d4ff">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chucky">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- ============================================================
+       HEADER
+       ============================================================ -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">
+        <div class="logo-icon">👁</div>
+        <div class="logo-text">
+          <span class="logo-main">ANIMATRÓNICO</span>
+          <span class="logo-sub">CONTROL SYSTEM v1.0</span>
+        </div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="status-bar">
+        <div class="status-item">
+          <div class="status-dot" id="dot-arduino"></div>
+          <span>Arduino</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot" id="dot-camera"></div>
+          <span>Cámara</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot" id="dot-face"></div>
+          <span>Rostro</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================================================
+       GRID PRINCIPAL
+       ============================================================ -->
+  <main class="main-grid">
+
+    <!-- ---- COLUMNA IZQUIERDA: cámara + servo + log ----------- -->
+    <div class="left-column">
+
+      <!-- Vista de cámara -->
+      <div class="card camera-card">
+        <div class="card-header">
+          <span class="card-title">Vista de Cámara</span>
+          <div class="camera-badge" id="camera-badge">ACTIVA</div>
+        </div>
+        <div class="camera-container">
+          <img src="/video_feed" id="camera-feed" alt="Sin señal">
+          <video id="phone-video" autoplay playsinline muted style="display:none;width:100%;height:100%;object-fit:cover;border-radius:6px;"></video>
+        </div>
+        <canvas id="phone-canvas" style="display:none"></canvas>
+        <div class="camera-info">
+          <span id="camera-state-text">Conectando...</span>
+          <span id="servo-position-display">Servo: 90°</span>
+        </div>
+        <button class="btn-phone-cam" id="btn-phone-cam" onclick="togglePhoneCamera()">
+          📱 USAR CÁMARA DEL TELÉFONO
+        </button>
+
+        <!-- ESP32-CAM -->
+        <div class="esp32-section">
+          <div class="esp32-header" onclick="toggleESP32Panel()">
+            <span>📡 ESP32-CAM</span>
+            <span class="esp32-source-badge" id="esp32-source-badge">LOCAL</span>
+          </div>
+          <div class="esp32-panel" id="esp32-panel" style="display:none">
+            <input type="text" id="esp32-url-input" class="esp32-url-input"
+                   placeholder="http://192.168.1.x:81/stream"
+                   onkeydown="if(event.key==='Enter')applyESP32Url()">
+            <div class="esp32-btns">
+              <button class="btn-esp32-connect" onclick="applyESP32Url()">Conectar</button>
+              <button class="btn-esp32-local"   onclick="restoreLocalCamera()">Webcam PC</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Posición del servo -->
+      <div class="card servo-card">
+        <div class="card-header">
+          <span class="card-title">Posición del Servo</span>
+          <span class="servo-angle" id="servo-angle-display">90°</span>
+        </div>
+        <div class="servo-bar-container">
+          <div class="servo-limit-label">MIN</div>
+          <div class="servo-bar">
+            <div class="servo-range"></div>
+            <div class="servo-indicator" id="servo-indicator"></div>
+            <div class="servo-center-mark"></div>
+          </div>
+          <div class="servo-limit-label">MAX</div>
+        </div>
+      </div>
+
+      <!-- Registro de eventos -->
+      <div class="card log-card">
+        <div class="card-header">
+          <span class="card-title">Registro de Eventos</span>
+          <button class="btn-icon" onclick="clearLog()" title="Limpiar">✕</button>
+        </div>
+        <div class="log-container" id="event-log">
+          <div class="log-entry log-info">
+            <span class="log-time">--:--:--</span>Sistema iniciando...
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /left-column -->
+
+    <!-- ---- COLUMNA CENTRAL: modos + controles + conexión ----- -->
+    <div class="center-column">
+
+      <!-- Botones de emergencia -->
+      <div class="emergency-bar">
+        <button class="btn-emergency" onclick="emergencyStop()">
+          ⚠ PARADA DE EMERGENCIA
+        </button>
+        <button class="btn-center" onclick="centerEyes()">
+          ◎ CENTRAR
+        </button>
+        <button class="btn-led btn-led-on" id="btn-led" onclick="toggleLED()"
+                title="Encender / apagar LEDs de los ojos">
+          💡 LEDs: <span id="led-state-text">ON</span>
+        </button>
+      </div>
+
+      <!-- Selector de modos -->
+      <div class="card mode-card">
+        <div class="card-header">
+          <span class="card-title">Selector de Modo</span>
+          <span class="active-mode-badge" id="active-mode-badge">REPOSO</span>
+        </div>
+        <div class="mode-grid">
+
+          <div class="mode-item" id="mode-gaze" onclick="setMode('gaze')">
+            <div class="mode-icon">👁️</div>
+            <div class="mode-name">Seguimiento</div>
+            <div class="mode-desc">de mirada</div>
+            <div class="mode-indicator"></div>
+          </div>
+
+          <div class="mode-item" id="mode-motion" onclick="setMode('motion')">
+            <div class="mode-icon">〰️</div>
+            <div class="mode-name">Detección</div>
+            <div class="mode-desc">de movimiento</div>
+            <div class="mode-indicator"></div>
+          </div>
+
+          <div class="mode-item" id="mode-manual" onclick="setMode('manual')">
+            <div class="mode-icon">🕹️</div>
+            <div class="mode-name">Control</div>
+            <div class="mode-desc">manual</div>
+            <div class="mode-indicator"></div>
+          </div>
+
+          <div class="mode-item active" id="mode-rest" onclick="setMode('rest')">
+            <div class="mode-icon">💤</div>
+            <div class="mode-name">Reposo</div>
+            <div class="mode-desc">ojos centrados</div>
+            <div class="mode-indicator"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Control manual -->
+      <div class="card controls-card" id="manual-controls">
+        <div class="card-header">
+          <span class="card-title">Control Manual</span>
+          <span style="font-size:0.72rem;color:var(--text-dim)">
+            Activo sólo en modo Manual
+          </span>
+        </div>
+
+        <div class="direction-controls">
+          <button class="btn-direction"
+                  onmousedown="startMove('left')"  onmouseup="stopMove()"
+                  ontouchstart="startMove('left')" ontouchend="stopMove()">
+            ◄ IZQUIERDA
+          </button>
+          <button class="btn-direction btn-center-dir" onclick="centerEyes()">
+            CENTRO
+          </button>
+          <button class="btn-direction"
+                  onmousedown="startMove('right')"  onmouseup="stopMove()"
+                  ontouchstart="startMove('right')" ontouchend="stopMove()">
+            DERECHA ►
+          </button>
+        </div>
+
+        <div class="slider-container">
+          <label class="slider-label">
+            <span>Posición directa</span>
+            <span id="manual-angle-display">90°</span>
+          </label>
+          <input type="range" class="position-slider" id="manual-slider"
+                 min="0" max="180" value="90"
+                 oninput="onManualSlider(this.value)">
+          <div class="slider-marks">
+            <span>MIN</span><span>CENTRO</span><span>MAX</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conexión Arduino -->
+      <div class="card connection-card">
+        <div class="card-header">
+          <span class="card-title">Conexión Arduino</span>
+        </div>
+        <div class="connection-controls">
+          <select id="port-select" class="port-select">
+            <option value="">Seleccionar puerto COM...</option>
+          </select>
+          <button class="btn-connect"   onclick="connectArduino()">Conectar</button>
+          <button class="btn-refresh-ports" onclick="refreshPorts()" title="Actualizar lista">↻</button>
+        </div>
+        <div class="connection-info">
+          <span id="connection-info-text">Sin conexión</span>
+        </div>
+      </div>
+
+    </div><!-- /center-column -->
+
+    <!-- ---- COLUMNA DERECHA: ajustes + calibración ------------ -->
+    <div class="right-column">
+
+      <div class="tab-bar">
+        <button class="tab active" id="tab-settings"    onclick="showTab('settings')">Ajustes</button>
+        <button class="tab"        id="tab-calibration" onclick="showTab('calibration')">Calibración</button>
+      </div>
+
+      <!-- Panel de ajustes -->
+      <div class="tab-content active" id="panel-settings">
+        <div class="card settings-card">
+
+          <div class="settings-section">
+            <div class="section-title">Control de Movimiento</div>
+
+            <div class="setting-row">
+              <label>Suavizado</label>
+              <div class="setting-control">
+                <input type="range" id="set-smoothing" min="0" max="95" value="25"
+                       oninput="updateSettingDisplay(this,'smoothing-val',v=>(v/100).toFixed(2))">
+                <span class="setting-value" id="smoothing-val">0.25</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>Zona muerta</label>
+              <div class="setting-control">
+                <input type="range" id="set-deadzone" min="0" max="50" value="15"
+                       oninput="updateSettingDisplay(this,'deadzone-val',v=>(v/100).toFixed(2))">
+                <span class="setting-value" id="deadzone-val">0.15</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>Retorno (s)</label>
+              <div class="setting-control">
+                <input type="range" id="set-return-timeout" min="1" max="20" value="3"
+                       oninput="updateSettingDisplay(this,'return-val',v=>v+'s')">
+                <span class="setting-value" id="return-val">3s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">Límites del Servo</div>
+
+            <div class="setting-row">
+              <label>Ángulo mínimo</label>
+              <div class="setting-control">
+                <input type="number" id="set-servo-min" class="number-input"
+                       min="0" max="89" value="50">
+                <span class="setting-value">°</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>Ángulo central</label>
+              <div class="setting-control">
+                <input type="number" id="set-servo-center" class="number-input"
+                       min="1" max="179" value="90">
+                <span class="setting-value">°</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>Ángulo máximo</label>
+              <div class="setting-control">
+                <input type="number" id="set-servo-max" class="number-input"
+                       min="91" max="180" value="130">
+                <span class="setting-value">°</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">Seguimiento de Mirada</div>
+            <div class="setting-row">
+              <label>Sensibilidad</label>
+              <div class="setting-control">
+                <input type="range" id="set-gaze-sensitivity" min="50" max="300" value="100"
+                       oninput="updateSettingDisplay(this,'gaze-sens-val',v=>(v/100).toFixed(1)+'x')">
+                <span class="setting-value" id="gaze-sens-val">1.0x</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <div class="section-title">Detección de Movimiento</div>
+
+            <div class="setting-row">
+              <label>Área mínima</label>
+              <div class="setting-control">
+                <input type="range" id="set-motion-area" min="100" max="5000" value="1000"
+                       oninput="updateSettingDisplay(this,'motion-area-val',v=>v+'px')">
+                <span class="setting-value" id="motion-area-val">1000px</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label>Retorno (s)</label>
+              <div class="setting-control">
+                <input type="range" id="set-motion-timeout" min="1" max="10" value="2"
+                       oninput="updateSettingDisplay(this,'motion-timeout-val',v=>v+'s')">
+                <span class="setting-value" id="motion-timeout-val">2s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-actions">
+            <button class="btn-apply"     onclick="applySettings()">Aplicar Cambios</button>
+            <button class="btn-secondary" onclick="loadSettings()">Restablecer</button>
+          </div>
+
+        </div>
+      </div><!-- /panel-settings -->
+
+      <!-- Panel de calibración -->
+      <div class="tab-content" id="panel-calibration">
+        <div class="card calib-card">
+
+          <div class="calib-status">
+            <div class="calib-icon">🎯</div>
+            <div class="calib-message" id="calib-message">
+              La calibración mejora la precisión del seguimiento de mirada.
+              Sigue los pasos del asistente de calibración.
+            </div>
+          </div>
+
+          <div class="calib-steps">
+            <div class="calib-step" id="calib-step-0">
+              <div class="step-num">1</div>
+              <div class="step-desc">
+                Mira al <strong>CENTRO</strong> de la cámara y mantén la posición
+              </div>
+              <div class="step-status" id="step-status-0">⬜</div>
+            </div>
+            <div class="calib-step" id="calib-step-1">
+              <div class="step-num">2</div>
+              <div class="step-desc">
+                Mira hacia la <strong>IZQUIERDA</strong> (extremo del ojo)
+              </div>
+              <div class="step-status" id="step-status-1">⬜</div>
+            </div>
+            <div class="calib-step" id="calib-step-2">
+              <div class="step-num">3</div>
+              <div class="step-desc">
+                Mira hacia la <strong>DERECHA</strong> (extremo del ojo)
+              </div>
+              <div class="step-status" id="step-status-2">⬜</div>
+            </div>
+          </div>
+
+          <div class="calib-note">
+            <strong>Nota:</strong> Mantén cada posición 2–3 segundos antes de
+            presionar "Siguiente". No se guardan imágenes del rostro; sólo
+            se registran valores numéricos de posición.
+          </div>
+
+          <div class="calib-actions" id="calib-actions">
+            <button class="btn-start-calib" id="btn-calib-start"
+                    onclick="startCalibration()">
+              ▶ Iniciar Calibración
+            </button>
+            <button class="btn-next-calib" id="btn-calib-next"
+                    onclick="nextCalibStep()" style="display:none">
+              Siguiente ▶
+            </button>
+            <button class="btn-cancel-calib" id="btn-calib-cancel"
+                    onclick="cancelCalibration()" style="display:none">
+              Cancelar
+            </button>
+          </div>
+
+          <div class="calib-saved">
+            <span id="calib-saved-text">Sin calibración guardada</span>
+          </div>
+
+        </div>
+      </div><!-- /panel-calibration -->
+
+    </div><!-- /right-column -->
+
+  </main>
+
+  <!-- Toast de notificaciones -->
+  <div id="toast" class="toast"></div>
+
+  <script src="/static/js/app.js"></script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
