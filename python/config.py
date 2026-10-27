@@ -10,12 +10,24 @@ import os
 # ================================================================
 # SERIAL / ARDUINO
 # ================================================================
+# Pines Arduino confirmados:
+#   Pin 9  → Servo ojos   (SG90)
+#   Pin 10 → Servo cuello (SG90)
+#   Pin 12 → LEDs ojos
 # Hardware confirmado: Arduino UNO R3 (clon)
 # [PROVISIONAL] Identifica tu puerto en Arduino IDE > Herramientas > Puerto
 SERIAL_PORT = "COM16"
 SERIAL_BAUDRATE = 9600
 SERIAL_TIMEOUT = 1.0        # segundos de espera en lectura
 SERIAL_RECONNECT_DELAY = 3.0  # segundos entre intentos de reconexión
+
+# ================================================================
+# SERVO CUELLO — pin 10 Arduino
+# ================================================================
+NECK_MIN_ANGLE    = 0
+NECK_MAX_ANGLE    = 180
+NECK_CENTER_ANGLE = 90
+NECK_SYNC_WITH_EYES = True  # True = cuello sigue a los ojos automáticamente
 
 # ================================================================
 # CÁMARA

@@ -77,6 +77,11 @@ async function updateStatus() {
     const angle = data.movement?.current_angle ?? 90;
     updateServoDisplay(angle, data.movement);
 
+    // Cuello
+    const neckAngle = data.neck?.angle ?? data.movement?.neck_angle ?? 90;
+    const neckSync  = data.neck?.sync  ?? data.movement?.neck_sync  ?? true;
+    updateNeckDisplay(neckAngle, neckSync);
+
     // Cámara estado texto
     const camText = document.getElementById('camera-state-text');
     camText.textContent = data.camera.connected
@@ -209,6 +214,45 @@ function updateLEDButton() {
   text.textContent = ledOn ? 'ON' : 'OFF';
   btn.classList.toggle('btn-led-on',  ledOn);
   btn.classList.toggle('btn-led-off', !ledOn);
+}
+
+// ================================================================
+// Neck controls
+// ================================================================
+function onNeckSyncToggle(enabled) {
+  apiFetch('/api/neck_sync', 'POST', { enabled });
+  const wrap = document.getElementById('neck-manual-slider-wrap');
+  if (wrap) wrap.style.display = enabled ? 'none' : 'block';
+  showToast(enabled ? 'Cuello sincronizado con ojos' : 'Cuello: control independiente', 'info');
+}
+
+function onNeckSlider(value) {
+  const angle = parseInt(value);
+  const el = document.getElementById('neck-manual-angle-display');
+  if (el) el.textContent = angle + '°';
+  apiFetch('/api/neck_position', 'POST', { angle });
+}
+
+function updateNeckDisplay(angle, sync) {
+  const angleEl = document.getElementById('neck-angle-display');
+  if (angleEl) angleEl.textContent = angle + '°';
+
+  const indicator = document.getElementById('neck-servo-indicator');
+  const range     = document.getElementById('neck-servo-range');
+  const pct = ((angle - 0) / 180) * 100;
+  if (indicator) indicator.style.left  = `${Math.max(0, Math.min(100, pct))}%`;
+  if (range)     range.style.width     = `${Math.max(0, Math.min(100, pct))}%`;
+
+  const statusText = document.getElementById('neck-sync-status-text');
+  if (statusText) statusText.textContent = sync ? '● Sincronizado con ojos' : '○ Control independiente';
+
+  // Sincronizar toggle con estado del servidor
+  const toggle = document.getElementById('neck-sync-toggle');
+  if (toggle && toggle.checked !== sync) {
+    toggle.checked = sync;
+    const wrap = document.getElementById('neck-manual-slider-wrap');
+    if (wrap) wrap.style.display = sync ? 'none' : 'block';
+  }
 }
 
 // ================================================================

@@ -129,6 +129,7 @@ def index():
 
 @app.route("/api/status")
 def api_status():
+    mv = movement.get_status()
     return jsonify({
         "arduino": {
             "connected": serial.connected,
@@ -138,7 +139,11 @@ def api_status():
             "connected": camera.connected,
             "index": cfg.CAMERA_INDEX,
         },
-        "movement": movement.get_status(),
+        "movement": mv,
+        "neck": {
+            "angle": mv.get("neck_angle", 90),
+            "sync": mv.get("neck_sync", True),
+        },
         "gaze": gaze.get_state(),
         "motion": motion.get_state(),
         "mode": movement.mode,
@@ -276,6 +281,30 @@ def api_connect_serial():
 def api_events():
     with _event_lock:
         return jsonify({"events": list(_event_log)})
+
+
+@app.route("/api/neck_position", methods=["POST"])
+def api_neck_position():
+    """Mueve el cuello a un ángulo específico (modo independiente)."""
+    data = request.get_json(force=True)
+    try:
+        angle = int(data.get("angle", 90))
+    except (ValueError, TypeError):
+        return jsonify({"error": "Ángulo inválido"}), 400
+    angle = max(cfg.NECK_MIN_ANGLE, min(cfg.NECK_MAX_ANGLE, angle))
+    movement.set_neck_manual_position(angle)
+    return jsonify({"success": True, "angle": angle})
+
+
+@app.route("/api/neck_sync", methods=["POST"])
+def api_neck_sync():
+    """Activa o desactiva la sincronización del cuello con los ojos."""
+    data = request.get_json(force=True)
+    enabled = bool(data.get("enabled", True))
+    movement.set_neck_sync(enabled)
+    cfg.NECK_SYNC_WITH_EYES = enabled
+    log_event(f"Cuello {'sincronizado con ojos' if enabled else 'control independiente'}")
+    return jsonify({"success": True, "neck_sync": enabled})
 
 
 @app.route("/api/reset_motion", methods=["POST"])

@@ -122,10 +122,19 @@ class SerialController:
         return ""
 
     def send_position(self, angle: int) -> bool:
-        """Envía POS,<angle>."""
+        """Envía POS,<angle> (servo ojos)."""
         angle = max(self.config.SERVO_MIN_ANGLE,
                     min(self.config.SERVO_MAX_ANGLE, int(angle)))
         return self.send_command(f"POS,{angle}")
+
+    def send_neck_position(self, angle: int) -> bool:
+        """Envía NECK,<angle> (servo cuello)."""
+        angle = max(getattr(self.config, 'NECK_MIN_ANGLE', 0),
+                    min(getattr(self.config, 'NECK_MAX_ANGLE', 180), int(angle)))
+        return self.send_command(f"NECK,{angle}")
+
+    def send_neck_center(self) -> bool:
+        return self.send_command("NECK_CENTER")
 
     def send_center(self) -> bool:
         return self.send_command("CENTER")

@@ -94,10 +94,10 @@
         </div>
       </div>
 
-      <!-- Posición del servo -->
+      <!-- Posición del servo (ojos) -->
       <div class="card servo-card">
         <div class="card-header">
-          <span class="card-title">Posición del Servo</span>
+          <span class="card-title">Servo — Ojos</span>
           <span class="servo-angle" id="servo-angle-display">90°</span>
         </div>
         <div class="servo-bar-container">
@@ -109,6 +109,25 @@
           </div>
           <div class="servo-limit-label">MAX</div>
         </div>
+      </div>
+
+      <!-- Posición del servo (cuello) -->
+      <div class="card servo-card">
+        <div class="card-header">
+          <span class="card-title">Servo — Cuello</span>
+          <span class="servo-angle" id="neck-angle-display">90°</span>
+        </div>
+        <div class="servo-bar-container">
+          <div class="servo-limit-label">MIN</div>
+          <div class="servo-bar">
+            <div class="servo-range" id="neck-servo-range"></div>
+            <div class="servo-indicator" id="neck-servo-indicator"></div>
+            <div class="servo-center-mark"></div>
+          </div>
+          <div class="servo-limit-label">MAX</div>
+        </div>
+        <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px;text-align:center"
+             id="neck-sync-status-text">● Sincronizado con ojos</div>
       </div>
 
       <!-- Registro de eventos -->
@@ -209,7 +228,7 @@
 
         <div class="slider-container">
           <label class="slider-label">
-            <span>Posición directa</span>
+            <span>Posición ojos</span>
             <span id="manual-angle-display">90°</span>
           </label>
           <input type="range" class="position-slider" id="manual-slider"
@@ -217,6 +236,31 @@
                  oninput="onManualSlider(this.value)">
           <div class="slider-marks">
             <span>MIN</span><span>CENTRO</span><span>MAX</span>
+          </div>
+        </div>
+
+        <!-- Control del cuello -->
+        <div class="slider-container" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+          <label class="slider-label" style="margin-bottom:6px">
+            <span>🦴 Cuello</span>
+            <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer">
+              <input type="checkbox" id="neck-sync-toggle" checked
+                     style="accent-color:var(--accent);width:14px;height:14px"
+                     onchange="onNeckSyncToggle(this.checked)">
+              Sincronizar con ojos
+            </label>
+          </label>
+          <div id="neck-manual-slider-wrap" style="display:none">
+            <label class="slider-label">
+              <span>Posición cuello</span>
+              <span id="neck-manual-angle-display">90°</span>
+            </label>
+            <input type="range" class="position-slider" id="neck-manual-slider"
+                   min="0" max="180" value="90"
+                   oninput="onNeckSlider(this.value)">
+            <div class="slider-marks">
+              <span>MIN</span><span>CENTRO</span><span>MAX</span>
+            </div>
           </div>
         </div>
       </div>

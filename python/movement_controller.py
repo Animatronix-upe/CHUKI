@@ -38,6 +38,11 @@ class MovementController:
         # Objetivos por modo (se actualiza según el modo activo)
         self._mode_targets = {m: float(config.SERVO_CENTER_ANGLE) for m in self.MODES}
 
+        # Cuello
+        self.neck_target      = float(getattr(config, 'NECK_CENTER_ANGLE', 90))
+        self._last_sent_neck  = -999
+        self.neck_sync        = getattr(config, 'NECK_SYNC_WITH_EYES', True)
+
         # Tiempo del último objetivo recibido en modos automáticos
         self._last_target_time = time.time()
 
@@ -82,7 +87,7 @@ class MovementController:
             self._last_target_time = time.time()
 
     def set_manual_position(self, angle: float):
-        """Posición directa desde el control manual."""
+        """Posición directa desde el control manual (ojos)."""
         with self._lock:
             angle = self._clamp(angle)
             self._mode_targets["manual"] = angle
@@ -90,21 +95,40 @@ class MovementController:
                 self.target_angle = angle
                 self._last_target_time = time.time()
 
+    def set_neck_manual_position(self, angle: float):
+        """Posición directa del cuello (modo independiente)."""
+        with self._lock:
+            neck_min = float(getattr(self.config, 'NECK_MIN_ANGLE', 0))
+            neck_max = float(getattr(self.config, 'NECK_MAX_ANGLE', 180))
+            self.neck_target = max(neck_min, min(neck_max, float(angle)))
+
+    def set_neck_sync(self, enabled: bool):
+        """Activa/desactiva sincronización cuello→ojos."""
+        with self._lock:
+            self.neck_sync = enabled
+
+    def get_neck_angle(self) -> int:
+        with self._lock:
+            if self.neck_sync:
+                return int(round(self.current_angle))
+            return int(round(self.neck_target))
+
     def center(self):
-        """Centra los ojos inmediatamente."""
+        """Centra ojos y cuello inmediatamente."""
         center = float(self.config.SERVO_CENTER_ANGLE)
         with self._lock:
             self.target_angle = center
+            self.neck_target  = center
             self._last_target_time = time.time()
         self.serial.send_center()
 
     def stop(self):
-        """Parada de emergencia: detiene el movimiento automático."""
+        """Parada de emergencia: detiene ojos y cuello."""
         with self._lock:
             self.mode = "rest"
-            # Mantiene la posición actual
             self._mode_targets["rest"] = self.current_angle
             self.target_angle = self.current_angle
+            self.neck_target  = float(self._last_sent_neck) if self._last_sent_neck >= 0 else float(getattr(self.config, 'NECK_CENTER_ANGLE', 90))
         self.serial.send_stop()
         logger.warning("PARADA DE EMERGENCIA")
 
@@ -132,10 +156,13 @@ class MovementController:
 
     def get_status(self) -> dict:
         with self._lock:
+            neck_angle = int(round(self.current_angle)) if self.neck_sync else int(round(self.neck_target))
             return {
                 "mode": self.mode,
                 "current_angle": int(round(self.current_angle)),
                 "target_angle": int(round(self.target_angle)),
+                "neck_angle": neck_angle,
+                "neck_sync": self.neck_sync,
                 "connected": self.serial.connected,
                 "smoothing": self.smoothing,
                 "dead_zone": self.dead_zone,
@@ -178,12 +205,19 @@ class MovementController:
             s = self.smoothing
             self.current_angle = self.current_angle * s + self.target_angle * (1.0 - s)
 
-            # Enviar comando solo si el cambio supera el umbral mínimo
+            # Ojos — enviar si el cambio supera el umbral mínimo
             angle_int = int(round(self.current_angle))
             if abs(angle_int - self._last_sent_angle) >= self.min_movement:
                 if self.serial.connected:
                     self.serial.send_position(angle_int)
                     self._last_sent_angle = angle_int
+
+            # Cuello — sigue a los ojos (sync) o posición independiente
+            neck_int = angle_int if self.neck_sync else int(round(self.neck_target))
+            if abs(neck_int - self._last_sent_neck) >= self.min_movement:
+                if self.serial.connected:
+                    self.serial.send_neck_position(neck_int)
+                    self._last_sent_neck = neck_int
 
     # ----------------------------------------------------------
     # Utilidades privadas

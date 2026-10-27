@@ -1,59 +1,57 @@
 /*
- * animatronico.ino - Control del servomotor SG90 y LEDs
+ * animatronico.ino - Control de ojos (SG90 pin 9), cuello (SG90 pin 10) y LEDs
  *
- * Hardware confirmado:
- *   - Arduino UNO R3 (clon)
- *   - Servo SG90: naranja=señal (pin 9), rojo=5V Arduino, marrón=GND
- *   - LEDs en ojos: ánodo → 220Ω → pin 12, cátodo → GND
+ * Hardware:
+ *   - Arduino UNO R3
+ *   - Servo ojos  SG90: señal → pin 9,  VCC → 5V, GND → GND
+ *   - Servo cuello SG90: señal → pin 10, VCC → 5V, GND → GND
+ *   - LEDs ojos: ánodo → 220Ω → pin 12, cátodo → GND
  *
- * Protocolo serial (9600 baud, \n como terminador):
- *   POS,90    → mover servo a 90 grados  →  OK,90
- *   CENTER    → mover al centro (90°)    →  OK,CENTER
- *   STOP      → mantener posición actual →  OK,STOP
- *   LED,1     → encender LEDs            →  OK,LED,1
- *   LED,0     → apagar LEDs              →  OK,LED,0
- *   STATUS    → estado actual            →  POS,<ángulo>,LED,<0/1>
- *   PING      → verificar conexión       →  PONG
- *
- * Librería requerida: Servo (incluida en Arduino IDE, sin instalar nada)
+ * Protocolo serial (9600 baud, \n terminador):
+ *   POS,90        → mover ojos a 90°          → OK,90
+ *   NECK,90       → mover cuello a 90°         → OK,NECK,90
+ *   CENTER        → centrar ojos Y cuello       → OK,CENTER
+ *   NECK_CENTER   → centrar solo cuello         → OK,NECK_CENTER
+ *   STOP          → mantener posición actual    → OK,STOP
+ *   LED,1 / LED,0 → encender / apagar LEDs      → OK,LED,1
+ *   STATUS        → estado actual               → POS,<ojo>,NECK,<cuello>,LED,<0/1>
+ *   PING          → verificar conexión          → PONG
  */
 
 #include <Servo.h>
 
 // ================================================================
-// PINES — Arduino UNO R3 confirmado
+// PINES
 // ================================================================
-const int SERVO_PIN = 9;    // Pin PWM (~) — señal al SG90 naranja
-const int LED_PIN   = 12;   // LEDs de los ojos (con resistencia 220Ω por LED)
+const int EYE_PIN  = 9;    // Servo ojos   (señal naranja)
+const int NECK_PIN = 10;   // Servo cuello (señal naranja)
+const int LED_PIN  = 12;   // LEDs de los ojos
 
 // ================================================================
-// LÍMITES DEL SG90 — rango físico completo
-// Si el mecanismo choca, reduce estos valores desde Arduino IDE
+// LÍMITES — ajusta si el mecanismo choca físicamente
 // ================================================================
-const int SERVO_MIN    = 0;    // Tope físico izquierdo SG90
-const int SERVO_MAX    = 180;  // Tope físico derecho  SG90
-const int SERVO_CENTER = 90;   // Ojos al frente
+const int SERVO_MIN    = 0;
+const int SERVO_MAX    = 180;
+const int SERVO_CENTER = 90;
 
 // ================================================================
-// VELOCIDAD DE MOVIMIENTO
+// VELOCIDAD
 // ================================================================
-const int MOVE_SPEED         = 2;   // grados por paso
-const unsigned long MOVE_MS  = 15;  // ms entre pasos (~67 pasos/seg)
+const int          MOVE_SPEED  = 2;    // grados por paso
+const unsigned long MOVE_MS    = 15;   // ms entre pasos
+const unsigned long TIMEOUT_MS = 8000; // ms sin comando → volver al centro (0 = desactivado)
 
 // ================================================================
-// TIMEOUT: si no llegan comandos en N ms → volver al centro
-// Cambia a 0 para desactivar
+// Variables
 // ================================================================
-const unsigned long TIMEOUT_MS = 8000;
+Servo servoEye;
+Servo servoNeck;
 
-// ================================================================
-// Variables internas
-// ================================================================
-Servo servo;
-
-int currentPos  = SERVO_CENTER;
-int targetPos   = SERVO_CENTER;
-bool ledState   = true;  // Los LEDs arrancan encendidos
+int eyeCurrentPos  = SERVO_CENTER;
+int eyeTargetPos   = SERVO_CENTER;
+int neckCurrentPos = SERVO_CENTER;
+int neckTargetPos  = SERVO_CENTER;
+bool ledState      = true;
 
 unsigned long lastMoveTime    = 0;
 unsigned long lastCommandTime = 0;
@@ -61,23 +59,28 @@ bool timeoutArmed             = false;
 
 String inputBuffer = "";
 
+// ================================================================
+// Setup
+// ================================================================
 void setup() {
   Serial.begin(9600);
 
-  // Servo
-  servo.attach(SERVO_PIN);
-  servo.write(SERVO_CENTER);
-  currentPos = SERVO_CENTER;
-  targetPos  = SERVO_CENTER;
+  servoEye.attach(EYE_PIN);
+  servoEye.write(SERVO_CENTER);
 
-  // LEDs
+  servoNeck.attach(NECK_PIN);
+  servoNeck.write(SERVO_CENTER);
+
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);  // encendidos al iniciar
+  digitalWrite(LED_PIN, HIGH);
 
   lastCommandTime = millis();
   Serial.println("READY");
 }
 
+// ================================================================
+// Loop
+// ================================================================
 void loop() {
   readSerial();
   checkTimeout();
@@ -108,25 +111,36 @@ void processCommand(String cmd) {
 
   if (cmd.startsWith("POS,")) {
     int angle = cmd.substring(4).toInt();
-    // Rechaza si el resultado del toInt() es 0 y el carácter no es '0'
-    if (angle == 0 && cmd.charAt(4) != '0') {
-      Serial.println("ERR,FORMATO");
-      return;
-    }
-    angle = constrain(angle, SERVO_MIN, SERVO_MAX);
-    targetPos = angle;
+    if (angle == 0 && cmd.charAt(4) != '0') { Serial.println("ERR,FORMATO"); return; }
+    eyeTargetPos = constrain(angle, SERVO_MIN, SERVO_MAX);
     lastCommandTime = millis();
     timeoutArmed = true;
-    Serial.print("OK,"); Serial.println(angle);
+    Serial.print("OK,"); Serial.println(eyeTargetPos);
+
+  } else if (cmd.startsWith("NECK,")) {
+    int angle = cmd.substring(5).toInt();
+    if (angle == 0 && cmd.charAt(5) != '0') { Serial.println("ERR,FORMATO"); return; }
+    neckTargetPos = constrain(angle, SERVO_MIN, SERVO_MAX);
+    lastCommandTime = millis();
+    timeoutArmed = true;
+    Serial.print("OK,NECK,"); Serial.println(neckTargetPos);
 
   } else if (cmd == "CENTER") {
-    targetPos = SERVO_CENTER;
+    eyeTargetPos  = SERVO_CENTER;
+    neckTargetPos = SERVO_CENTER;
     lastCommandTime = millis();
     timeoutArmed = true;
     Serial.println("OK,CENTER");
 
+  } else if (cmd == "NECK_CENTER") {
+    neckTargetPos = SERVO_CENTER;
+    lastCommandTime = millis();
+    timeoutArmed = true;
+    Serial.println("OK,NECK_CENTER");
+
   } else if (cmd == "STOP") {
-    targetPos = currentPos;
+    eyeTargetPos  = eyeCurrentPos;
+    neckTargetPos = neckCurrentPos;
     timeoutArmed = false;
     Serial.println("OK,STOP");
 
@@ -141,10 +155,9 @@ void processCommand(String cmd) {
     Serial.println("OK,LED,0");
 
   } else if (cmd == "STATUS") {
-    Serial.print("POS,");
-    Serial.print(currentPos);
-    Serial.print(",LED,");
-    Serial.println(ledState ? 1 : 0);
+    Serial.print("POS,");  Serial.print(eyeCurrentPos);
+    Serial.print(",NECK,"); Serial.print(neckCurrentPos);
+    Serial.print(",LED,");  Serial.println(ledState ? 1 : 0);
 
   } else if (cmd == "PING") {
     Serial.println("PONG");
@@ -160,24 +173,35 @@ void processCommand(String cmd) {
 void checkTimeout() {
   if (TIMEOUT_MS > 0 && timeoutArmed) {
     if (millis() - lastCommandTime > TIMEOUT_MS) {
-      targetPos = SERVO_CENTER;
+      eyeTargetPos  = SERVO_CENTER;
+      neckTargetPos = SERVO_CENTER;
       timeoutArmed = false;
     }
   }
 }
 
 // ================================================================
-// Movimiento suavizado paso a paso
+// Movimiento suavizado paso a paso (ojos y cuello)
 // ================================================================
 void moveStep() {
   if (millis() - lastMoveTime < MOVE_MS) return;
   lastMoveTime = millis();
 
-  if (currentPos < targetPos) {
-    currentPos = min(currentPos + MOVE_SPEED, targetPos);
-    servo.write(currentPos);
-  } else if (currentPos > targetPos) {
-    currentPos = max(currentPos - MOVE_SPEED, targetPos);
-    servo.write(currentPos);
+  // Ojos
+  if (eyeCurrentPos < eyeTargetPos) {
+    eyeCurrentPos = min(eyeCurrentPos + MOVE_SPEED, eyeTargetPos);
+    servoEye.write(eyeCurrentPos);
+  } else if (eyeCurrentPos > eyeTargetPos) {
+    eyeCurrentPos = max(eyeCurrentPos - MOVE_SPEED, eyeTargetPos);
+    servoEye.write(eyeCurrentPos);
+  }
+
+  // Cuello
+  if (neckCurrentPos < neckTargetPos) {
+    neckCurrentPos = min(neckCurrentPos + MOVE_SPEED, neckTargetPos);
+    servoNeck.write(neckCurrentPos);
+  } else if (neckCurrentPos > neckTargetPos) {
+    neckCurrentPos = max(neckCurrentPos - MOVE_SPEED, neckTargetPos);
+    servoNeck.write(neckCurrentPos);
   }
 }
