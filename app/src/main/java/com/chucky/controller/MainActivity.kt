@@ -76,6 +76,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.setBackgroundColor(Color.parseColor("#0a0c12"))
+        // MIUI black screen fix: forzar software rendering
+        webView.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
@@ -84,7 +86,7 @@ class MainActivity : AppCompatActivity() {
                 handler.removeCallbacksAndMessages(null)
                 handler.postDelayed({
                     if (!pageLoaded) {
-                        view?.loadData(offlinePage(getSavedUrl()), "text/html; charset=utf-8", "UTF-8")
+                        view?.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
                     }
                 }, 10000)
             }
@@ -96,7 +98,7 @@ class MainActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) {
                     pageLoaded = true
                     handler.removeCallbacksAndMessages(null)
-                    view?.loadData(offlinePage(getSavedUrl()), "text/html; charset=utf-8", "UTF-8")
+                    view?.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
                 }
             }
         }
