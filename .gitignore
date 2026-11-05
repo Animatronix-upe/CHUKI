@@ -1,4 +1,15 @@
-# Python
+# ===== ANDROID =====
+.gradle/
+build/
+**/build/
+local.properties
+.idea/
+*.iml
+*.jks
+*.keystore
+google-services.json
+
+# ===== PYTHON / FLASK =====
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,34 +17,26 @@ __pycache__/
 .Python
 *.egg-info/
 dist/
-build/
-
-# Logs y datos generados
 animatronico.log
 *.log
 calibration.json
-
-# Entornos virtuales
 venv/
 env/
 .env
 
-# IDEs
-.vscode/
-.idea/
-*.suo
-*.user
-
-# Archivos de sistema
-Thumbs.db
-.DS_Store
-desktop.ini
-
-# Modelos ML (pesados, se descargan en runtime)
+# ===== MODELOS ML (pesados) =====
 python/*.task
 python/*.tflite
 python/vosk-model*/
 python/user_config.json
 
-# Claude
+# ===== IDE / SISTEMA =====
+.vscode/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ===== CLAUDE =====
 .claude/
