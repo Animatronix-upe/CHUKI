@@ -30,6 +30,12 @@ class SerialController:
         self._reconnect_thread = None
         self._stop_reconnect = threading.Event()
 
+        # Puerto secundario para mandíbula (segundo Arduino)
+        self.jaw_port = getattr(config, 'JAW_SERIAL_PORT', None)
+        self.jaw_connection = None
+        self.jaw_connected = False
+        self._jaw_lock = threading.Lock()
+
     # ----------------------------------------------------------
     # Conexión
     # ----------------------------------------------------------
@@ -40,10 +46,12 @@ class SerialController:
             conn = serial.Serial(
                 port=self.port,
                 baudrate=self.baudrate,
-                timeout=self.config.SERIAL_TIMEOUT
+                timeout=self.config.SERIAL_TIMEOUT,
+                dsrdtr=False,   # No bajar DTR → no resetear otros Arduinos en el hub
+                rtscts=False,
             )
             # Arduino UNO/Nano se reinician al abrir el puerto; esperar
-            time.sleep(2.0)
+            time.sleep(2.5)
 
             # Verificar con PING
             conn.reset_input_buffer()
@@ -68,6 +76,35 @@ class SerialController:
                 self.connected = False
             return False
 
+    def connect_jaw(self) -> bool:
+        """Conecta con el Arduino de la mandíbula (segundo puerto).
+        El sketch de boca usa Serial.parseInt() — no responde a PING."""
+        if not self.jaw_port:
+            return False
+        try:
+            conn = serial.Serial(
+                port=self.jaw_port,
+                baudrate=self.baudrate,
+                timeout=self.config.SERIAL_TIMEOUT,
+                dsrdtr=False,   # No bajar DTR → no resetear otros Arduinos en el hub
+                rtscts=False,
+            )
+            # Dar tiempo al Arduino de boca para que arranque
+            time.sleep(2.5)
+            conn.reset_input_buffer()
+            # Cerrar boca al iniciar
+            conn.write(b"0\n")
+            with self._jaw_lock:
+                self.jaw_connection = conn
+                self.jaw_connected = True
+            logger.info(f"Arduino boca conectado en {self.jaw_port}")
+            return True
+        except serial.SerialException as e:
+            logger.error(f"No se pudo conectar Arduino boca en {self.jaw_port}: {e}")
+            with self._jaw_lock:
+                self.jaw_connected = False
+            return False
+
     def disconnect(self):
         """Desconecta de Arduino de forma segura."""
         self._stop_reconnect.set()
@@ -80,6 +117,15 @@ class SerialController:
                 except Exception:
                     pass
             self.connected = False
+        with self._jaw_lock:
+            if self.jaw_connection and self.jaw_connection.is_open:
+                try:
+                    self.jaw_connection.write(b"0\n")
+                    time.sleep(0.1)
+                    self.jaw_connection.close()
+                except Exception:
+                    pass
+            self.jaw_connected = False
         logger.info("Arduino desconectado")
 
     # ----------------------------------------------------------
@@ -132,6 +178,22 @@ class SerialController:
         angle = max(getattr(self.config, 'NECK_MIN_ANGLE', 0),
                     min(getattr(self.config, 'NECK_MAX_ANGLE', 180), int(angle)))
         return self.send_command(f"NECK,{angle}")
+
+    def send_jaw(self, angle: int) -> bool:
+        """Envía ángulo de mandíbula.
+        - Puerto jaw separado (sketch parseInt): envía solo '45\n'
+        - Sin puerto jaw / sketch combinado:      envía 'JAW,45\n' al puerto principal."""
+        angle = max(0, min(90, int(angle)))
+        with self._jaw_lock:
+            if self.jaw_connected and self.jaw_connection:
+                try:
+                    self.jaw_connection.write(f"{angle}\n".encode("utf-8"))
+                    return True
+                except serial.SerialException as e:
+                    logger.error(f"Error en Arduino boca: {e}")
+                    self.jaw_connected = False
+        # Sin puerto jaw separado → sketch combinado en el puerto principal
+        return self.send_command(f"JAW,{angle}")
 
     def send_neck_center(self) -> bool:
         return self.send_command("NECK_CENTER")

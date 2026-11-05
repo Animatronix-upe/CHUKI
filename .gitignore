@@ -29,9 +29,11 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
-# Modelos MediaPipe (pesados, se descargan en runtime)
+# Modelos ML (pesados, se descargan en runtime)
 python/*.task
 python/*.tflite
+python/vosk-model*/
+python/user_config.json
 
 # Claude
 .claude/

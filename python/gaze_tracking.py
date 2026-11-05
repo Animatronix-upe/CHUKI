@@ -36,6 +36,13 @@ class GazeTracker:
     RIGHT_EYE_INNER = 362
     RIGHT_EYE_OUTER = 263
 
+    # Landmarks para detectar parpadeo (EAR — Eye Aspect Ratio)
+    LEFT_EYE_TOP    = 159
+    LEFT_EYE_BOT    = 145
+    RIGHT_EYE_TOP   = 386
+    RIGHT_EYE_BOT   = 374
+    _EAR_THRESHOLD  = 0.15  # por debajo = ojo cerrado → ignorar gaze
+
     def __init__(self, config):
         self.config = config
         self._new_api = False
@@ -62,6 +69,8 @@ class GazeTracker:
         self.face_detected = False
         self.gaze_x = 0.0
         self._history = deque(maxlen=config.GAZE_HISTORY_LENGTH)
+        self._last_face_time = 0.0   # última vez que se detectó cara
+        self._hold_secs = 2.5        # segundos que se mantiene la última posición
 
         self.calibration = {
             "center": 0.0,
@@ -92,9 +101,9 @@ class GazeTracker:
         options = vision.FaceLandmarkerOptions(
             base_options=base_options,
             num_faces=1,
-            min_face_detection_confidence=0.5,
-            min_face_presence_confidence=0.5,
-            min_tracking_confidence=0.5
+            min_face_detection_confidence=0.4,
+            min_face_presence_confidence=0.4,
+            min_tracking_confidence=0.4,
         )
         self.face_mesh = vision.FaceLandmarker.create_from_options(options)
         logger.info("MediaPipe: usando Tasks API 1.x con face_landmarker.task")
@@ -120,34 +129,43 @@ class GazeTracker:
     # Procesamiento de frame
     # ----------------------------------------------------------
 
+    # Resolución de procesado (más pequeño = más rápido, suficiente para iris)
+    _PROC_W = 320
+    _PROC_H = 240
+
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # Reducir resolución para MediaPipe → ~4x más rápido
+        small = cv2.resize(frame, (self._PROC_W, self._PROC_H))
+        rgb   = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
         if self._new_api:
-            # mediapipe 1.x
             mp_image = self._mp.Image(
                 image_format=self._mp.ImageFormat.SRGB, data=rgb
             )
-            result = self.face_mesh.detect(mp_image)
-            face_list = result.face_landmarks  # list of list[NormalizedLandmark]
+            result    = self.face_mesh.detect(mp_image)
+            face_list = result.face_landmarks
         else:
-            # mediapipe 0.10.x legacy
             rgb.flags.writeable = False
-            result = self.face_mesh.process(rgb)
+            result    = self.face_mesh.process(rgb)
             rgb.flags.writeable = True
-            face_list = result.multi_face_landmarks  # list of FaceLandmarks
+            face_list = result.multi_face_landmarks
 
         annotated = frame.copy()
 
+        import time as _time
+        now = _time.time()
+
         if face_list:
             self.face_detected = True
+            self._last_face_time = now
 
-            # Normalizar landmarks a lista de (px, py)
+            # Landmarks normalizados → píxeles en el frame ORIGINAL
             if self._new_api:
-                lms_raw = face_list[0]           # list[NormalizedLandmark]
+                lms_raw = face_list[0]
             else:
-                lms_raw = face_list[0].landmark  # RepeatedContainer
+                lms_raw = face_list[0].landmark
 
             lms = [(int(lm.x * w), int(lm.y * h)) for lm in lms_raw]
 
@@ -159,11 +177,13 @@ class GazeTracker:
             right_ratio = self._eye_ratio(lms, right_iris,
                                           self.RIGHT_EYE_INNER, self.RIGHT_EYE_OUTER)
 
-            raw = ((left_ratio + right_ratio) / 2.0) - 0.5
-            gaze = self._apply_calibration(raw) * self.config.GAZE_SENSITIVITY
-
-            self._history.append(gaze)
-            self.gaze_x = float(np.mean(self._history))
+            # Filtrar parpadeo: si el ojo está cerrado, no actualizar gaze
+            ear = self._eye_aspect_ratio(lms)
+            if ear > self._EAR_THRESHOLD:
+                raw  = ((left_ratio + right_ratio) / 2.0) - 0.5
+                gaze = self._apply_calibration(raw) * self.config.GAZE_SENSITIVITY
+                self._history.append(gaze)
+                self.gaze_x = float(np.mean(self._history))
 
             if self.calibrating and self.calib_step < 3:
                 key = self._CALIB_KEYS[self.calib_step]
@@ -171,10 +191,19 @@ class GazeTracker:
 
             self._draw(annotated, lms, left_iris, right_iris, w, h)
         else:
-            self.face_detected = False
-            cv2.putText(annotated, "Rostro no detectado",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7, (0, 0, 200), 2)
+            elapsed = now - self._last_face_time
+            if elapsed < self._hold_secs:
+                # Mantener última posición — cara brevemente perdida (multitud, parpadeo)
+                self.face_detected = True  # reportar como detectada para no volver al centro
+                secs_left = int(self._hold_secs - elapsed) + 1
+                cv2.putText(annotated, f"Buscando rostro… ({secs_left}s)",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.65, (0, 165, 255), 2)
+            else:
+                self.face_detected = False
+                cv2.putText(annotated, "Rostro no detectado",
+                            (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.7, (0, 0, 200), 2)
 
         return annotated
 
@@ -297,6 +326,20 @@ class GazeTracker:
         if abs(width) < 1:
             return 0.5
         return max(0.0, min(1.0, (iris_center[0] - outer[0]) / width))
+
+    def _eye_aspect_ratio(self, lms) -> float:
+        """EAR promedio de ambos ojos — < _EAR_THRESHOLD indica parpadeo."""
+        def _ear(top_idx, bot_idx, outer_idx, inner_idx):
+            top   = lms[top_idx]
+            bot   = lms[bot_idx]
+            outer = lms[outer_idx]
+            inner = lms[inner_idx]
+            v = abs(top[1] - bot[1])
+            h = abs(inner[0] - outer[0])
+            return v / h if h > 0 else 1.0
+        left  = _ear(self.LEFT_EYE_TOP,  self.LEFT_EYE_BOT,  self.LEFT_EYE_OUTER,  self.LEFT_EYE_INNER)
+        right = _ear(self.RIGHT_EYE_TOP, self.RIGHT_EYE_BOT, self.RIGHT_EYE_INNER, self.RIGHT_EYE_OUTER)
+        return (left + right) / 2.0
 
     def _apply_calibration(self, raw: float) -> float:
         c = self.calibration["center"]

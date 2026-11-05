@@ -62,6 +62,27 @@ async function updateStatus() {
       camBadge.className = 'camera-badge offline';
     }
 
+    // Botones fuente de cámara — sincronizar con estado del servidor
+    const esp32Url = data.camera?.esp32_url ?? '';
+    const btnEsp32  = document.getElementById('btn-src-esp32');
+    const btnLaptop = document.getElementById('btn-src-laptop');
+    if (btnEsp32 && btnLaptop && !btnEsp32.textContent.includes('Conectando')) {
+      const isEsp32 = !!esp32Url;
+      btnEsp32.classList.toggle('active', isEsp32);
+      btnLaptop.classList.toggle('active', !isEsp32);
+    }
+    // Banner de estado ESP32
+    if (esp32Url) {
+      const shortUrl = esp32Url.replace(/^https?:\/\//, '');
+      if (data.camera.connected) {
+        setESP32ConnBanner('ok', '✔ ESP32-CAM Conectado', shortUrl);
+      } else {
+        setESP32ConnBanner('error', '✘ ESP32-CAM Sin señal', shortUrl + ' — sin respuesta');
+      }
+    } else if (!btnEsp32?.textContent.includes('Conectando')) {
+      setESP32ConnBanner('', 'ESP32-CAM — Sin conexión', 'Ingresa la URL del stream y presiona Conectar');
+    }
+
     // Rostro detectado
     const faceDot = document.getElementById('dot-face');
     const faceDetected = data.gaze?.face_detected;
@@ -78,9 +99,10 @@ async function updateStatus() {
     updateServoDisplay(angle, data.movement);
 
     // Cuello
-    const neckAngle = data.neck?.angle ?? data.movement?.neck_angle ?? 90;
+    const neckAngle = data.neck?.angle ?? data.movement?.neck_angle ?? 55;
     const neckSync  = data.neck?.sync  ?? data.movement?.neck_sync  ?? true;
-    updateNeckDisplay(neckAngle, neckSync);
+    const neckMode  = data.neck?.mode  ?? data.movement?.neck_mode  ?? 'user';
+    updateNeckDisplay(neckAngle, neckSync, neckMode);
 
     // Cámara estado texto
     const camText = document.getElementById('camera-state-text');
@@ -230,26 +252,58 @@ function onNeckSlider(value) {
   const angle = parseInt(value);
   const el = document.getElementById('neck-manual-angle-display');
   if (el) el.textContent = angle + '°';
+  _updateNeckBar(angle);
   apiFetch('/api/neck_position', 'POST', { angle });
 }
 
-function updateNeckDisplay(angle, sync) {
+function setNeckPos(angle) {
+  const slider = document.getElementById('neck-manual-slider');
+  if (slider) { slider.value = angle; }
+  const el = document.getElementById('neck-manual-angle-display');
+  if (el) el.textContent = angle + '°';
+  _updateNeckBar(angle);
+  apiFetch('/api/neck_position', 'POST', { angle });
+}
+
+function _updateNeckBar(angle) {
+  const pct = (angle / 110) * 100;
+  const fill = document.getElementById('neck-bar-fill');
+  const dot  = document.getElementById('neck-bar-dot');
+  const disp = document.getElementById('neck-angle-display2');
+  if (fill) fill.style.width = pct + '%';
+  if (dot)  dot.style.left  = pct + '%';
+  if (disp) disp.textContent = angle + '°';
+}
+
+function updateNeckDisplay(angle, sync, neckMode) {
+  _updateNeckBar(angle);
   const angleEl = document.getElementById('neck-angle-display');
   if (angleEl) angleEl.textContent = angle + '°';
 
   const indicator = document.getElementById('neck-servo-indicator');
   const range     = document.getElementById('neck-servo-range');
-  const pct = ((angle - 0) / 180) * 100;
+  const pct = ((angle - 0) / 110) * 100;
   if (indicator) indicator.style.left  = `${Math.max(0, Math.min(100, pct))}%`;
   if (range)     range.style.width     = `${Math.max(0, Math.min(100, pct))}%`;
 
+  let syncLabel;
+  if (neckMode === 'gaze_locked') {
+    syncLabel = '🔒 Bloqueado — solo ojos en modo mirada';
+  } else if (neckMode === 'motion_delayed') {
+    syncLabel = '⏱ Retardo 5s — modo detección';
+  } else {
+    syncLabel = sync ? '● Sincronizado con ojos' : '○ Control independiente';
+  }
   const statusText = document.getElementById('neck-sync-status-text');
-  if (statusText) statusText.textContent = sync ? '● Sincronizado con ojos' : '○ Control independiente';
+  if (statusText) statusText.textContent = syncLabel;
+  const ctrlText = document.getElementById('neck-ctrl-sync-text');
+  if (ctrlText) ctrlText.textContent = syncLabel;
 
-  // Sincronizar toggle con estado del servidor
+  // Deshabilitar toggle de sync en modos automáticos
   const toggle = document.getElementById('neck-sync-toggle');
-  if (toggle && toggle.checked !== sync) {
-    toggle.checked = sync;
+  if (toggle) {
+    toggle.disabled = (neckMode === 'gaze_locked' || neckMode === 'motion_delayed');
+    if (toggle.checked !== sync) toggle.checked = sync;
     const wrap = document.getElementById('neck-manual-slider-wrap');
     if (wrap) wrap.style.display = sync ? 'none' : 'block';
   }
@@ -326,6 +380,7 @@ async function loadSettings() {
     setSlider('set-smoothing',       Math.round(s.smoothing * 100),    'smoothing-val',    v => (v/100).toFixed(2));
     setSlider('set-deadzone',        Math.round(s.dead_zone * 100),     'deadzone-val',     v => (v/100).toFixed(2));
     setSlider('set-return-timeout',  s.return_timeout ?? 3,             'return-val',       v => v+'s');
+    setSlider('set-eye-neck-delay',  s.eye_neck_delay_ms ?? 300,        'eye-neck-delay-val', v => v+'ms');
     setSlider('set-gaze-sensitivity',Math.round((s.gaze_sensitivity ?? 1.0)*100), 'gaze-sens-val', v => (v/100).toFixed(1)+'x');
     setSlider('set-motion-area',     s.motion_min_area ?? 1000,         'motion-area-val',  v => v+'px');
     setSlider('set-motion-timeout',  s.motion_return_timeout ?? 2,      'motion-timeout-val', v => v+'s');
@@ -353,6 +408,7 @@ async function applySettings() {
     dead_zone:             parseFloat(deadzoneRaw) / 100,
     return_timeout:        parseFloat(document.getElementById('set-return-timeout')?.value ?? 3),
     gaze_sensitivity:      parseFloat(document.getElementById('set-gaze-sensitivity')?.value ?? 100) / 100,
+    eye_neck_delay_ms:     parseInt(document.getElementById('set-eye-neck-delay')?.value ?? 300),
     motion_min_area:       parseInt(document.getElementById('set-motion-area')?.value ?? 1000),
     motion_return_timeout: parseFloat(document.getElementById('set-motion-timeout')?.value ?? 2),
     servo_min:             parseInt(document.getElementById('set-servo-min')?.value ?? 50),
@@ -505,31 +561,56 @@ function showToast(msg, type = 'info') {
 // ================================================================
 // ESP32-CAM
 // ================================================================
-function toggleESP32Panel() {
-  const p = document.getElementById('esp32-panel');
-  if (p) p.style.display = p.style.display === 'none' ? 'flex' : 'none';
+
+// Actualiza el banner grande de estado del ESP32
+function setESP32ConnBanner(state, main, sub) {
+  const banner  = document.getElementById('esp32-conn-banner');
+  const mainEl  = document.getElementById('esp32-conn-main');
+  const subEl   = document.getElementById('esp32-conn-sub');
+  const iconEl  = document.getElementById('esp32-conn-icon');
+  if (!banner) return;
+  banner.className = 'esp32-status-banner' + (state ? ' conn-' + state : '');
+  if (mainEl) { mainEl.textContent = main; mainEl.className = 'esp32-conn-main' + (state ? ' ' + state : ''); }
+  if (subEl && sub !== undefined) subEl.textContent = sub;
+  if (iconEl) iconEl.textContent = state === 'ok' ? '✅' : state === 'error' ? '❌' : state === 'connecting' ? '🔄' : '⚫';
+}
+
+function selectCamSource(source) {
+  const panel   = document.getElementById('esp32-detail-panel');
+  const btnEsp  = document.getElementById('btn-src-esp32');
+  const btnLap  = document.getElementById('btn-src-laptop');
+  if (source === 'esp32') {
+    if (panel) panel.style.display = 'block';
+    btnLap?.classList.remove('active');
+    btnEsp?.classList.add('active');
+  } else {
+    if (panel) panel.style.display = 'none';
+    btnEsp?.classList.remove('active');
+    btnLap?.classList.add('active');
+    restoreLocalCamera();
+  }
 }
 
 async function applyESP32Url() {
   const url = (document.getElementById('esp32-url-input')?.value || '').trim();
   if (!url) { showToast('Escribe la URL del ESP32', 'warning'); return; }
+
+  const btnEsp = document.getElementById('btn-src-esp32');
+  if (btnEsp) btnEsp.textContent = '📡 Conectando...';
+  setESP32ConnBanner('connecting', 'Conectando al ESP32...', url);
   showToast('Conectando al ESP32...', 'info');
+
   const result = await apiFetch('/api/esp32_camera', 'POST', { url });
-  if (result?.success) {
-    _updateESP32Badge('esp32');
-    showToast('ESP32-CAM conectada ✓', 'success');
-    document.getElementById('esp32-panel').style.display = 'none';
-  }
+  if (btnEsp) btnEsp.textContent = '📡 ESP32-CAM';
+  // El banner se actualiza al recibir el siguiente /api/status
 }
 
 async function restoreLocalCamera() {
   showToast('Restaurando webcam local...', 'info');
-  const result = await apiFetch('/api/esp32_camera', 'POST', { url: '' });
-  if (result?.success) {
-    _updateESP32Badge('local');
-    showToast('Webcam PC activa', 'success');
-    document.getElementById('esp32-panel').style.display = 'none';
-  }
+  const btnLap = document.getElementById('btn-src-laptop');
+  if (btnLap) btnLap.textContent = '💻 Conectando...';
+  await apiFetch('/api/esp32_camera', 'POST', { url: '' });
+  if (btnLap) btnLap.textContent = '💻 Laptop';
 }
 
 async function _loadESP32Config() {
@@ -537,97 +618,329 @@ async function _loadESP32Config() {
   if (!data) return;
   const input = document.getElementById('esp32-url-input');
   if (input) input.value = data.url || '';
-  _updateESP32Badge(data.source);
-}
-
-function _updateESP32Badge(source) {
-  const badge = document.getElementById('esp32-source-badge');
-  if (!badge) return;
-  if (source === 'esp32') {
-    badge.textContent = 'ESP32';
-    badge.classList.add('active');
-  } else {
-    badge.textContent = 'LOCAL';
-    badge.classList.remove('active');
+  // Establecer botón activo y visibilidad del panel
+  const isEsp32 = data.source === 'esp32';
+  document.getElementById('btn-src-laptop')?.classList.toggle('active', !isEsp32);
+  document.getElementById('btn-src-esp32')?.classList.toggle('active', isEsp32);
+  const panel = document.getElementById('esp32-detail-panel');
+  if (panel) panel.style.display = isEsp32 ? 'block' : 'none';
+  if (isEsp32 && data.url) {
+    setESP32ConnBanner('connecting', 'Verificando ESP32...', data.url);
   }
 }
 
 // ================================================================
-// Cámara del teléfono
+// WiFi del ESP32
 // ================================================================
-let _phoneStream   = null;
-let _phoneInterval = null;
-let _phoneActive   = false;
+let _esp32WifiWaitTimer = null;
+let _esp32LastKnownUrl  = '';
 
-async function togglePhoneCamera() {
-  if (_phoneActive) {
-    _stopPhoneCamera();
-  } else {
-    await _startPhoneCamera();
-  }
-}
+async function saveESP32Wifi() {
+  const ssid = document.getElementById('esp32-wifi-ssid').value.trim();
+  const pass = document.getElementById('esp32-wifi-pass').value;
+  if (!ssid) { showToast('Escribe el nombre de la red (SSID)', 'error'); return; }
 
-async function _startPhoneCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    showToast('getUserMedia no disponible en este navegador', 'error');
-    return;
-  }
+  showToast('Enviando credenciales al ESP32...', 'info');
   try {
-    _phoneStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 320 },
-        height: { ideal: 240 }
+    const r = await apiFetch('/api/esp32_wifi', 'POST', { ssid, password: pass });
+    if (r.success) {
+      showToast(r.message || 'ESP32 reiniciando con nueva red', 'success');
+      document.getElementById('esp32-wifi-ssid').value = '';
+      document.getElementById('esp32-wifi-pass').value = '';
+      // Guardar URL actual para detectar cambio
+      try {
+        const st = await apiFetch('/api/status');
+        _esp32LastKnownUrl = st?.camera?.esp32_url || '';
+      } catch(_) {}
+      // Mostrar panel de espera
+      const statusDiv = document.getElementById('esp32-wifi-status');
+      const statusText = document.getElementById('esp32-wifi-status-text');
+      const newUrlRow = document.getElementById('esp32-new-url-row');
+      if (statusDiv) {
+        statusDiv.style.display = 'block';
+        statusText.textContent = 'Esperando anuncio del ESP32... (puede tardar ~30s)';
+        newUrlRow.style.display = 'none';
       }
-    });
-    const vid = document.getElementById('phone-video');
-    vid.srcObject = _phoneStream;
-
-    document.getElementById('camera-feed').style.display  = 'none';
-    vid.style.display = 'block';
-
-    _phoneInterval = setInterval(_sendPhoneFrame, 150);
-    _phoneActive   = true;
-
-    const btn = document.getElementById('btn-phone-cam');
-    if (btn) { btn.textContent = '🖥 USAR CÁMARA PC'; btn.classList.add('active'); }
-    showToast('Cámara del teléfono activa', 'success');
+      // Iniciar polling para detectar cuando el ESP32 anuncia la nueva IP
+      if (_esp32WifiWaitTimer) clearInterval(_esp32WifiWaitTimer);
+      let tries = 0;
+      _esp32WifiWaitTimer = setInterval(async () => {
+        tries++;
+        try {
+          const st = await apiFetch('/api/status');
+          const newUrl = st?.camera?.esp32_url || '';
+          if (newUrl && newUrl !== _esp32LastKnownUrl) {
+            clearInterval(_esp32WifiWaitTimer);
+            _esp32WifiWaitTimer = null;
+            // Mostrar nueva URL
+            const linkEl = document.getElementById('esp32-new-url-link');
+            if (linkEl) {
+              linkEl.href = newUrl;
+              linkEl.textContent = newUrl;
+            }
+            if (statusText) statusText.textContent = 'ESP32 reconectado con nueva red.';
+            if (newUrlRow) newUrlRow.style.display = 'block';
+            showToast('ESP32 reconectado: ' + newUrl, 'success');
+          } else if (tries >= 60) { // 60 * 3s = 3 min
+            clearInterval(_esp32WifiWaitTimer);
+            _esp32WifiWaitTimer = null;
+            if (statusText) statusText.textContent = 'No se recibio anuncio. Ingresa la nueva URL manualmente.';
+          }
+        } catch(_) {}
+      }, 3000);
+    } else {
+      showToast('Error: ' + (r.error || 'desconocido'), 'error');
+    }
   } catch (e) {
-    showToast('Sin acceso a la cámara: ' + e.message, 'error');
+    showToast('Sin respuesta del ESP32', 'error');
   }
 }
 
-function _stopPhoneCamera() {
-  if (_phoneStream) { _phoneStream.getTracks().forEach(t => t.stop()); _phoneStream = null; }
-  clearInterval(_phoneInterval); _phoneInterval = null;
-  _phoneActive = false;
-
-  document.getElementById('camera-feed').style.display  = 'block';
-  const vid = document.getElementById('phone-video');
-  if (vid) { vid.srcObject = null; vid.style.display = 'none'; }
-
-  const btn = document.getElementById('btn-phone-cam');
-  if (btn) { btn.textContent = '📱 USAR CÁMARA DEL TELÉFONO'; btn.classList.remove('active'); }
-  showToast('Cámara PC restaurada');
+function applyAnnouncedUrl() {
+  const linkEl = document.getElementById('esp32-new-url-link');
+  if (!linkEl || !linkEl.href || linkEl.href === '#') return;
+  const newUrl = linkEl.textContent.trim();
+  document.getElementById('esp32-url-input').value = newUrl;
+  applyESP32Url();
+  document.getElementById('esp32-wifi-status').style.display = 'none';
+  showToast('URL actualizada: ' + newUrl, 'success');
 }
 
-async function _sendPhoneFrame() {
-  const vid = document.getElementById('phone-video');
-  const cvs = document.getElementById('phone-canvas');
-  if (!vid || vid.readyState < 2 || !cvs) return;
+// ================================================================
+// CHUCKY PARLANTE
+// ================================================================
 
-  cvs.width  = vid.videoWidth  || 320;
-  cvs.height = vid.videoHeight || 240;
-  cvs.getContext('2d').drawImage(vid, 0, 0, cvs.width, cvs.height);
+let _chuckyPollTimer = null;
 
-  try {
-    await fetch('/api/phone_frame', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frame: cvs.toDataURL('image/jpeg', 0.5) })
-    });
-  } catch (_) {}
+function _updateChuckyUI(data) {
+  if (!data) return;
+
+  // Banner de estado
+  const banner = document.getElementById('chucky-status-banner');
+  const icon   = document.getElementById('chucky-status-icon');
+  const text   = document.getElementById('chucky-status-text');
+  const sub    = document.getElementById('chucky-status-sub');
+  const btn    = document.getElementById('chucky-toggle-btn');
+
+  const statusMap = {
+    inactivo:    { icon: '⚫', color: 'rgba(100,100,100,.3)',  bg: 'rgba(30,42,69,.4)',          label: 'Inactivo',      sub: 'Activa el modo parlante para comenzar' },
+    escuchando:  { icon: '👂', color: 'rgba(0,230,118,.5)',   bg: 'rgba(0,230,118,.07)',         label: 'Escuchando…',   sub: `Di "${data.wake_word || 'andy'}" para activar` },
+    procesando:  { icon: '🧠', color: 'rgba(255,171,64,.5)',  bg: 'rgba(255,171,64,.07)',        label: 'Procesando…',   sub: 'Consultando con la IA' },
+    hablando:    { icon: '😈', color: 'rgba(229,57,53,.6)',   bg: 'rgba(229,57,53,.1)',          label: '¡Hablando!',    sub: 'Chucky está respondiendo' },
+  };
+  const st = statusMap[data.status] || statusMap.inactivo;
+
+  if (banner) { banner.style.borderColor = st.color; banner.style.background = st.bg; }
+  if (icon)   icon.textContent = st.icon;
+  if (text)   { text.textContent = st.label; text.style.color = st.color.includes('229') ? '#ff8a80' : st.color.includes('230') ? 'var(--success)' : st.color.includes('171') ? 'var(--warning)' : 'var(--text-dim)'; }
+  if (sub)    sub.textContent  = st.sub;
+  if (btn)    { btn.textContent = data.active ? '⏹ Detener' : '▶ Activar'; }
+
+  // Textos
+  const heard = document.getElementById('chucky-heard');
+  const resp  = document.getElementById('chucky-response');
+  if (heard && data.last_heard)    heard.textContent    = `"${data.last_heard}"`;
+  if (resp  && data.last_response) resp.textContent     = `"${data.last_response}"`;
+
+  // Mandíbula
+  const jawFill  = document.getElementById('chucky-jaw-fill');
+  const jawAngle = document.getElementById('chucky-jaw-angle');
+  const jawPct   = Math.min(100, (data.jaw_angle / 90) * 100);
+  if (jawFill)  jawFill.style.width = jawPct + '%';
+  if (jawAngle) jawAngle.textContent = (data.jaw_angle || 0) + '°';
+
+  // Modelo / descarga
+  const modelSt    = document.getElementById('chucky-model-status');
+  const dlBtn      = document.getElementById('chucky-download-btn');
+  if (modelSt) {
+    if (data.downloading) {
+      modelSt.textContent = `⬇ Descargando modelo… ${data.download_pct || 0}%`;
+      modelSt.style.color = 'var(--warning)';
+    } else if (data.model_ready) {
+      modelSt.textContent = '✅ Modelo de voz listo';
+      modelSt.style.color = 'var(--success)';
+    } else {
+      modelSt.textContent = data.error || '⚠ Modelo de voz no encontrado';
+      modelSt.style.color = 'var(--warning)';
+    }
+  }
+  if (dlBtn) dlBtn.style.display = (!data.model_ready && !data.downloading) ? 'block' : 'none';
+
+  // Badge TTS engine
+  const badge = document.getElementById('chucky-tts-badge');
+  if (badge) {
+    if (data.tts_engine === 'elevenlabs') {
+      badge.textContent = '🎭 Motor TTS: ElevenLabs' + (data.elevenlabs_voice_set ? ' ✅ voz configurada' : ' ⚠ sin Voice ID');
+      badge.style.background = 'rgba(224,64,251,.15)';
+      badge.style.color = '#e040fb';
+    } else {
+      badge.textContent = '🔊 Motor TTS: gTTS (genérico) — configura ElevenLabs para la voz de Chucky';
+      badge.style.background = 'rgba(100,100,100,.15)';
+      badge.style.color = 'var(--text-dim)';
+    }
+  }
 }
+
+async function toggleChucky() {
+  const btn = document.getElementById('chucky-toggle-btn');
+  const st  = await apiFetch('/api/chucky/status');
+  if (!st) return;
+  if (st.active) {
+    await apiFetch('/api/chucky/stop', 'POST');
+    clearInterval(_chuckyPollTimer);
+    _chuckyPollTimer = null;
+  } else {
+    const res = await apiFetch('/api/chucky/start', 'POST');
+    if (res && !res.success) { showToast(res.error || 'No se pudo iniciar', 'error'); return; }
+    _startChuckyPoll();
+  }
+  setTimeout(() => apiFetch('/api/chucky/status').then(_updateChuckyUI), 300);
+}
+
+function _startChuckyPoll() {
+  if (_chuckyPollTimer) return;
+  _chuckyPollTimer = setInterval(async () => {
+    const data = await apiFetch('/api/chucky/status');
+    _updateChuckyUI(data);
+    if (data && !data.active) {
+      clearInterval(_chuckyPollTimer);
+      _chuckyPollTimer = null;
+    }
+  }, 500);
+}
+
+async function chuckySpeak() {
+  const input = document.getElementById('chucky-manual-text');
+  const texto = input ? input.value.trim() : '';
+  if (!texto) return;
+  await apiFetch('/api/chucky/speak', 'POST', { text: texto });
+  if (input) input.value = '';
+  _startChuckyPoll();
+}
+
+async function saveChuckyConfig() {
+  const key     = document.getElementById('chucky-api-key')?.value.trim()   || null;
+  const wake    = document.getElementById('chucky-wake-word')?.value.trim() || null;
+  const endW    = document.getElementById('chucky-end-word')?.value.trim()  || null;
+  const elKey   = document.getElementById('chucky-el-key')?.value.trim()    || null;
+  const elVoice = document.getElementById('chucky-el-voice')?.value.trim()  || null;
+  const payload = {};
+  if (key)     payload.groq_api_key        = key;
+  if (wake)    payload.wake_word           = wake;
+  if (endW)    payload.end_word            = endW;
+  if (elKey)   payload.elevenlabs_api_key  = elKey;
+  if (elVoice) payload.elevenlabs_voice_id = elVoice;
+  const res = await apiFetch('/api/chucky/config', 'POST', payload);
+  if (res?.success) showToast('Config de Chucky guardada', 'success');
+}
+
+async function downloadChuckyModel() {
+  const res = await apiFetch('/api/chucky/download_model', 'POST');
+  if (res) showToast('Descarga iniciada (~39 MB)', 'info');
+  _startChuckyPoll();
+}
+
+// Cargar estado inicial de Chucky al abrir la página
+(async function _initChucky() {
+  const data = await apiFetch('/api/chucky/status');
+  if (data) {
+    _updateChuckyUI(data);
+    // Pre-llenar palabras clave
+    const ww = document.getElementById('chucky-wake-word');
+    const ew = document.getElementById('chucky-end-word');
+    if (ww && data.wake_word) ww.value = data.wake_word;
+    if (ew && data.end_word)  ew.value = data.end_word;
+    if (data.active) _startChuckyPoll();
+  }
+})();
+
+// ================================================================
+// FRASES AUTOMÁTICAS
+// ================================================================
+let _autoActive = false;
+
+async function _loadAutoFrasesUI() {
+  const data = await apiFetch('/api/chucky/auto_frases');
+  if (!data) return;
+  _autoActive = data.auto_active;
+  _updateAutoUI(data);
+}
+
+function _updateAutoUI(data) {
+  const dot = document.getElementById('auto-status-dot');
+  const txt = document.getElementById('auto-status-txt');
+  const btn = document.getElementById('auto-toggle-btn');
+  const cb  = document.getElementById('scary-voice-cb');
+  const iv  = document.getElementById('auto-interval');
+  const ta  = document.getElementById('auto-phrases-area');
+
+  _autoActive = data.auto_active;
+
+  if (dot) dot.style.background = data.auto_active ? '#ce93d8' : '#555';
+  if (txt) txt.textContent      = data.auto_active
+    ? `Activo — frase cada ${data.auto_interval}s`
+    : 'Inactivo';
+  if (btn) {
+    btn.textContent = data.auto_active ? '⏹ Detener' : '▶ Iniciar';
+    btn.style.background = data.auto_active
+      ? 'rgba(123,31,162,.35)'
+      : 'rgba(123,31,162,.12)';
+  }
+  if (cb  && data.scary_voice  !== undefined) cb.checked  = data.scary_voice;
+  if (iv  && data.auto_interval !== undefined) iv.value   = data.auto_interval;
+  if (ta  && data.auto_phrases  && !ta._userEdited) {
+    ta.value = data.auto_phrases.join('\n');
+  }
+}
+
+async function toggleAutoFrases() {
+  const iv     = document.getElementById('auto-interval');
+  const cb     = document.getElementById('scary-voice-cb');
+  const ta     = document.getElementById('auto-phrases-area');
+  const action = _autoActive ? 'stop' : 'start';
+  const payload = { action };
+
+  if (!_autoActive) {
+    payload.interval    = parseInt(iv?.value || '30');
+    payload.scary_voice = cb?.checked ?? true;
+    const lines = (ta?.value || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length > 0) payload.phrases = lines;
+  }
+
+  const res = await apiFetch('/api/chucky/auto_frases', 'POST', payload);
+  if (res) _updateAutoUI(res);
+}
+
+async function saveAutoConfig() {
+  const iv = document.getElementById('auto-interval');
+  const cb = document.getElementById('scary-voice-cb');
+  const ta = document.getElementById('auto-phrases-area');
+  const lines = (ta?.value || '').split('\n').map(l => l.trim()).filter(Boolean);
+
+  const res = await apiFetch('/api/chucky/auto_frases', 'POST', {
+    action:      'config',
+    interval:    parseInt(iv?.value || '30'),
+    scary_voice: cb?.checked ?? true,
+    phrases:     lines.length > 0 ? lines : undefined,
+  });
+  if (res?.success) {
+    showToast('Config auto-frases guardada', 'success');
+    if (ta) ta._userEdited = false;
+  }
+}
+
+// Marcar que el textarea fue editado manualmente
+(function() {
+  document.addEventListener('DOMContentLoaded', () => {
+    const ta = document.getElementById('auto-phrases-area');
+    if (ta) ta.addEventListener('input', () => { ta._userEdited = true; });
+  });
+})();
+
+// Cargar estado al abrir la página
+(async function _initAutoFrases() {
+  await _loadAutoFrasesUI();
+})();
 
 // ================================================================
 // API helper
