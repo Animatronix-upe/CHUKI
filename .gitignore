@@ -1,19 +1,38 @@
-# Gradle
+# ===== ANDROID =====
 .gradle/
 build/
 **/build/
-
-# Local properties (SDK path)
 local.properties
-
-# Android Studio
 .idea/
 *.iml
-.DS_Store
-
-# Keystore
 *.jks
 *.keystore
-
-# Google Services
 google-services.json
+
+# ===== PYTHON / FLASK =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+animatronico.log
+*.log
+calibration.json
+venv/
+env/
+.env
+python/*.task
+python/*.tflite
+
+# ===== IDE / SISTEMA =====
+.vscode/
+*.suo
+*.user
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ===== CLAUDE =====
+.claude/

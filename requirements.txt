@@ -1,0 +1,17 @@
+# Animatrónico - Dependencias Python
+# Instalar con: pip install -r requirements.txt
+
+# Servidor web
+flask==3.0.3
+
+# Comunicación serial con Arduino
+pyserial==3.5
+
+# Visión artificial
+opencv-python==4.10.0.84
+
+# Seguimiento de mirada (requiere mediapipe)
+mediapipe==0.10.33
+
+# Utilidades numéricas (normalmente ya instalado con opencv/mediapipe)
+numpy>=1.24.0
