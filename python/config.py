@@ -10,13 +10,15 @@ import os
 # ================================================================
 # SERIAL / ARDUINO
 # ================================================================
-# Pines Arduino confirmados:
-#   Pin 9  → Servo ojos   (SG90)
-#   Pin 10 → Servo cuello (SG90)
+# Pines Arduino (sketch chucky_combinado.ino):
+#   Pin 9  → Servo ojos       (SG90)
+#   Pin 10 → Servo cuello     (SG90)
+#   Pin 11 → Servo mandíbula  (SG90)  ← nuevo
 #   Pin 12 → LEDs ojos
-# Hardware confirmado: Arduino UNO R3 (clon)
+# Hardware: Arduino UNO R3 — UN SOLO ARDUINO en COM14
 # [PROVISIONAL] Identifica tu puerto en Arduino IDE > Herramientas > Puerto
-SERIAL_PORT = "COM16"
+SERIAL_PORT     = "COM14"   # Arduino combinado (ojos + cuello + mandíbula + LEDs)
+JAW_SERIAL_PORT = ""        # Vacío = usar el puerto principal (sketch combinado)
 SERIAL_BAUDRATE = 9600
 SERIAL_TIMEOUT = 1.0        # segundos de espera en lectura
 SERIAL_RECONNECT_DELAY = 3.0  # segundos entre intentos de reconexión
@@ -24,10 +26,14 @@ SERIAL_RECONNECT_DELAY = 3.0  # segundos entre intentos de reconexión
 # ================================================================
 # SERVO CUELLO — pin 10 Arduino
 # ================================================================
-NECK_MIN_ANGLE    = 0
-NECK_MAX_ANGLE    = 180
-NECK_CENTER_ANGLE = 90
-NECK_SYNC_WITH_EYES = True  # True = cuello sigue a los ojos automáticamente
+NECK_MIN_ANGLE    = 0    # CabezaOficial: ANGULO_IZQ
+NECK_MAX_ANGLE    = 110  # CabezaOficial: ANGULO_DER
+NECK_CENTER_ANGLE = 55   # CabezaOficial: CENTRO
+NECK_SYNC_WITH_EYES = True
+NECK_INVERT       = False
+NECK_SMOOTHING_FACTOR = 0.88   # 0.0=sin suavizado, 0.95=muy lento — más alto que ojos
+NECK_MIN_MOVEMENT = 2          # Grados mínimos para enviar nuevo comando al cuello
+NECK_DELAY_MS     = 300        # ms que los ojos se adelantan al cuello (efecto depredador)
 
 # ================================================================
 # CÁMARA
@@ -71,21 +77,21 @@ LED_ON_AT_START = True  # Encender LEDs al iniciar
 # CONTROL DE MOVIMIENTO
 # ================================================================
 # Suavizado exponencial: 0.0 = sin suavizado, 0.95 = muy lento
-SMOOTHING_FACTOR = 0.25
-# Zona muerta: fracción del ancho de imagen donde no hay movimiento
-DEAD_ZONE_RATIO = 0.05
+SMOOTHING_FACTOR = 0.18          # 0.0=sin suavizado 0.95=muy lento
+# Zona muerta: fracción del rango donde no hay movimiento
+DEAD_ZONE_RATIO = 0.03
 # Mínimo de grados para enviar un nuevo comando al servo
-MOVEMENT_MIN_DEGREES = 2
+MOVEMENT_MIN_DEGREES = 1
 # Segundos sin detección antes de volver al centro
-RETURN_TO_CENTER_TIMEOUT = 3.0
+RETURN_TO_CENTER_TIMEOUT = 2.0
 
 # ================================================================
 # SEGUIMIENTO DE MIRADA
 # ================================================================
 # Número de frames para promediar (mayor = más suave pero más lento)
-GAZE_HISTORY_LENGTH = 8
+GAZE_HISTORY_LENGTH = 5
 # Multiplicador de sensibilidad (1.0 = normal)
-GAZE_SENSITIVITY = 2.5
+GAZE_SENSITIVITY = 3.0
 
 # ================================================================
 # DETECCIÓN DE MOVIMIENTO
@@ -98,6 +104,30 @@ MOTION_BLUR_SIZE = 21
 MOTION_THRESHOLD = 25
 # Segundos sin movimiento para volver al centro
 MOTION_RETURN_TIMEOUT = 2.0
+
+# ================================================================
+# CHUCKY PARLANTE
+# ================================================================
+# Clave de API de Groq (https://console.groq.com/keys)
+GROQ_API_KEY = ""
+# Ruta o nombre del modelo Vosk (relativa al directorio python/)
+VOSK_MODEL_PATH = "vosk-model-small-es-0.42"
+# Palabra clave para activar la conversación
+CHUCKY_WAKE_WORD = "andy"
+# Palabra para terminar la conversación
+CHUCKY_END_WORD  = "adios"
+
+# ================================================================
+# ELEVENLABS — VOZ ORIGINAL DE CHUCKY
+# ================================================================
+# Clave de API de ElevenLabs (https://elevenlabs.io → Profile → API Key)
+ELEVENLABS_API_KEY = ""
+# ID de la voz Chucky en ElevenLabs
+# Busca "Chucky" en https://elevenlabs.io/voice-library y copia el Voice ID
+# Ejemplo: "pNInz6obpgDQGcFmaJgB" (Adam — voz por defecto si no configuras)
+ELEVENLABS_VOICE_ID = ""
+# Modelo TTS de ElevenLabs: "eleven_multilingual_v2" soporta español
+ELEVENLABS_MODEL = "eleven_multilingual_v2"
 
 # ================================================================
 # ARCHIVOS

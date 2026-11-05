@@ -1,4 +1,4 @@
-const CACHE = 'chucky-v2';
+const CACHE = 'chucky-v3';
 const STATIC = [
   '/',
   '/static/css/style.css',

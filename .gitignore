@@ -23,8 +23,12 @@ calibration.json
 venv/
 env/
 .env
+
+# ===== MODELOS ML (pesados) =====
 python/*.task
 python/*.tflite
+python/vosk-model*/
+python/user_config.json
 
 # ===== IDE / SISTEMA =====
 .vscode/

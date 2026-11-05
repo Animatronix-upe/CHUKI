@@ -15,6 +15,14 @@
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 
   <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .camera-source-bar{display:flex;gap:8px;margin-top:12px}
+    .btn-cam-src{flex:1;padding:12px 8px;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.22);color:var(--text-dim);border-radius:8px;cursor:pointer;font-size:.9rem;font-family:var(--font-tech);letter-spacing:1px;transition:all .18s}
+    .btn-cam-src:hover{background:rgba(0,212,255,.13);color:var(--accent)}
+    .btn-cam-src.active{background:rgba(0,212,255,.18);border-color:var(--accent);color:var(--accent);font-weight:700;box-shadow:0 0 10px rgba(0,212,255,.2)}
+    .neck-section-card{border-top:3px solid #ff9800 !important;margin-top:16px !important}
+    .neck-section-card .card-header{border-bottom:1px solid rgba(255,152,0,.2);padding-bottom:10px}
+  </style>
 </head>
 <body>
 
@@ -65,31 +73,54 @@
         </div>
         <div class="camera-container">
           <img src="/video_feed" id="camera-feed" alt="Sin señal">
-          <video id="phone-video" autoplay playsinline muted style="display:none;width:100%;height:100%;object-fit:cover;border-radius:6px;"></video>
         </div>
-        <canvas id="phone-canvas" style="display:none"></canvas>
         <div class="camera-info">
           <span id="camera-state-text">Conectando...</span>
           <span id="servo-position-display">Servo: 90°</span>
         </div>
-        <button class="btn-phone-cam" id="btn-phone-cam" onclick="togglePhoneCamera()">
-          📱 USAR CÁMARA DEL TELÉFONO
-        </button>
 
-        <!-- ESP32-CAM -->
-        <div class="esp32-section">
-          <div class="esp32-header" onclick="toggleESP32Panel()">
-            <span>📡 ESP32-CAM</span>
-            <span class="esp32-source-badge" id="esp32-source-badge">LOCAL</span>
-          </div>
-          <div class="esp32-panel" id="esp32-panel" style="display:none">
-            <input type="text" id="esp32-url-input" class="esp32-url-input"
-                   placeholder="http://192.168.1.x:81/stream"
-                   onkeydown="if(event.key==='Enter')applyESP32Url()">
-            <div class="esp32-btns">
-              <button class="btn-esp32-connect" onclick="applyESP32Url()">Conectar</button>
-              <button class="btn-esp32-local"   onclick="restoreLocalCamera()">Webcam PC</button>
+        <!-- Fuente de cámara — botones lado a lado -->
+        <div class="camera-source-bar">
+          <button class="btn-cam-src active" id="btn-src-laptop" onclick="selectCamSource('local')">
+            💻 Laptop
+          </button>
+          <button class="btn-cam-src" id="btn-src-esp32" onclick="selectCamSource('esp32')">
+            📡 ESP32-CAM
+          </button>
+        </div>
+        <!-- Panel ESP32 (visible cuando ESP32 activo) -->
+        <div id="esp32-detail-panel" style="display:none;margin-top:10px">
+
+          <!-- Banner grande de estado de conexión -->
+          <div id="esp32-conn-banner" class="esp32-status-banner">
+            <div class="esp32-conn-icon" id="esp32-conn-icon">⚫</div>
+            <div class="esp32-conn-info">
+              <div class="esp32-conn-main" id="esp32-conn-main">ESP32-CAM — Sin conexión</div>
+              <div class="esp32-conn-sub"  id="esp32-conn-sub">Ingresa la URL del stream y presiona Conectar</div>
             </div>
+          </div>
+
+          <input type="text" id="esp32-url-input" class="esp32-url-input"
+                 placeholder="http://192.168.1.x:81/stream"
+                 onkeydown="if(event.key==='Enter')applyESP32Url()">
+          <div class="esp32-btns" style="margin-top:6px">
+            <button class="btn-esp32-connect" onclick="applyESP32Url()">Conectar</button>
+          </div>
+          <!-- Config WiFi del ESP32 -->
+          <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,212,255,.15)">
+            <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:6px">⚙ Cambiar WiFi del ESP32</div>
+            <input type="text"     id="esp32-wifi-ssid"  class="esp32-url-input" placeholder="Nombre de red (SSID)" style="margin-bottom:4px">
+            <input type="password" id="esp32-wifi-pass"  class="esp32-url-input" placeholder="Contraseña WiFi">
+            <button class="btn-esp32-connect" style="margin-top:5px;width:100%;background:rgba(255,170,0,.15);border-color:#ffaa00;color:#ffaa00" onclick="saveESP32Wifi()">💾 Guardar WiFi y reiniciar ESP32</button>
+            <div id="esp32-wifi-status" style="display:none;margin-top:6px;padding:6px 8px;border-radius:4px;font-size:0.65rem;border:1px solid rgba(0,212,255,.2);background:rgba(0,212,255,.05)">
+              <div id="esp32-wifi-status-text" style="color:var(--text-dim);font-size:0.88rem">Esperando anuncio del ESP32...</div>
+              <div id="esp32-new-url-row" style="display:none;margin-top:4px">
+                <span style="color:var(--text-dim)">Nueva URL: </span>
+                <a id="esp32-new-url-link" href="#" style="color:#00e676;word-break:break-all" target="_blank"></a>
+                <button onclick="applyAnnouncedUrl()" style="margin-left:6px;padding:2px 6px;font-size:0.6rem;background:rgba(0,230,118,.15);border:1px solid #00e676;color:#00e676;border-radius:3px;cursor:pointer">Usar esta URL</button>
+              </div>
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-dim);margin-top:4px">El ESP32 se reiniciará con la nueva red.</div>
           </div>
         </div>
       </div>
@@ -127,7 +158,7 @@
           <div class="servo-limit-label">MAX</div>
         </div>
         <div style="font-size:0.7rem;color:var(--text-dim);margin-top:4px;text-align:center"
-             id="neck-sync-status-text">● Sincronizado con ojos</div>
+             id="neck-sync-status-text" style="font-size:0.82rem">● Sincronizado con ojos</div>
       </div>
 
       <!-- Registro de eventos -->
@@ -239,31 +270,193 @@
           </div>
         </div>
 
-        <!-- Control del cuello -->
-        <div class="slider-container" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
-          <label class="slider-label" style="margin-bottom:6px">
-            <span>🦴 Cuello</span>
-            <label style="display:flex;align-items:center;gap:6px;font-size:0.78rem;cursor:pointer">
-              <input type="checkbox" id="neck-sync-toggle" checked
-                     style="accent-color:var(--accent);width:14px;height:14px"
-                     onchange="onNeckSyncToggle(this.checked)">
-              Sincronizar con ojos
-            </label>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════
+           APARTADO: CONTROL DE CUELLO
+           ═══════════════════════════════════════════════════════ -->
+      <div class="card neck-section-card">
+        <div class="card-header">
+          <span class="card-title" style="color:#ff9800;font-size:1.05rem">🦴 Control de Cuello</span>
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.72rem;color:var(--text-dim);cursor:pointer">
+            <input type="checkbox" id="neck-sync-toggle" checked
+                   style="accent-color:#ff9800;width:14px;height:14px"
+                   onchange="onNeckSyncToggle(this.checked)">
+            Sincronizar con ojos
           </label>
-          <div id="neck-manual-slider-wrap" style="display:none">
-            <label class="slider-label">
-              <span>Posición cuello</span>
-              <span id="neck-manual-angle-display">90°</span>
-            </label>
-            <input type="range" class="position-slider" id="neck-manual-slider"
-                   min="0" max="180" value="90"
-                   oninput="onNeckSlider(this.value)">
-            <div class="slider-marks">
-              <span>MIN</span><span>CENTRO</span><span>MAX</span>
-            </div>
+        </div>
+
+        <!-- Botones rápidos siempre visibles -->
+        <div class="direction-controls" style="margin:10px 0">
+          <button class="btn-direction" style="border-color:rgba(255,152,0,.5)" onclick="setNeckPos(0)">◄ IZQ</button>
+          <button class="btn-direction btn-center-dir" style="border-color:rgba(255,152,0,.5)" onclick="setNeckPos(55)">CENTRO</button>
+          <button class="btn-direction" style="border-color:rgba(255,152,0,.5)" onclick="setNeckPos(110)">DER ►</button>
+        </div>
+
+        <!-- Slider manual (visible solo cuando sync está OFF) -->
+        <div id="neck-manual-slider-wrap" style="display:none">
+          <label class="slider-label">
+            <span>Posición cuello</span>
+            <span id="neck-manual-angle-display">55°</span>
+          </label>
+          <input type="range" class="position-slider" id="neck-manual-slider"
+                 min="0" max="110" value="55"
+                 oninput="onNeckSlider(this.value)">
+          <div class="slider-marks">
+            <span>MIN</span><span>CENTRO</span><span>MAX</span>
           </div>
         </div>
+
+        <!-- Indicador visual del ángulo actual -->
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+          <div style="flex:1;height:6px;background:var(--border);border-radius:3px;position:relative">
+            <div id="neck-bar-fill" style="position:absolute;left:0;top:0;height:100%;width:50%;background:#ff9800;border-radius:3px;transition:width .2s"></div>
+            <div id="neck-bar-dot"  style="position:absolute;top:-5px;left:50%;width:16px;height:16px;background:#ff9800;border-radius:50%;transform:translateX(-50%);transition:left .2s;box-shadow:0 0 8px rgba(255,152,0,.55)"></div>
+          </div>
+          <span id="neck-angle-display2" style="font-size:1.1rem;color:#ff9800;min-width:44px;text-align:right;font-weight:700">55°</span>
+        </div>
+        <div style="font-size:0.82rem;color:var(--text-dim);margin-top:6px;text-align:center" id="neck-ctrl-sync-text">● Sincronizado con ojos</div>
       </div>
+
+      <!-- ═══════════════════════════════════════════════════════
+           APARTADO: CHUCKY PARLANTE
+           ═══════════════════════════════════════════════════════ -->
+      <div class="card" style="border-top:3px solid #e53935 !important;margin-top:16px !important">
+        <div class="card-header" style="border-bottom:1px solid rgba(229,57,53,.25);padding-bottom:10px">
+          <span class="card-title" style="color:#e53935;font-size:1.05rem">🎤 Chucky Parlante</span>
+          <button id="chucky-toggle-btn" class="btn-emergency" style="font-size:0.85rem;padding:6px 14px;border-color:rgba(229,57,53,.5);background:rgba(229,57,53,.12)"
+                  onclick="toggleChucky()">▶ Activar</button>
+        </div>
+
+        <!-- Banner de estado -->
+        <div id="chucky-status-banner" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-top:10px;background:rgba(30,42,69,.4);border:1.5px solid rgba(100,100,100,.3);transition:all .4s">
+          <span id="chucky-status-icon" style="font-size:1.6rem">⚫</span>
+          <div>
+            <div id="chucky-status-text" style="font-size:1rem;font-weight:700;color:var(--text-dim)">Inactivo</div>
+            <div id="chucky-status-sub"  style="font-size:0.8rem;color:var(--text-dim);margin-top:2px">Activa el modo parlante para comenzar</div>
+          </div>
+        </div>
+
+        <!-- Última frase escuchada -->
+        <div style="margin-top:12px">
+          <div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Escuché:</div>
+          <div id="chucky-heard" style="font-size:0.92rem;color:var(--text);background:rgba(0,0,0,.2);border-radius:6px;padding:8px 10px;min-height:32px;font-style:italic">—</div>
+        </div>
+
+        <!-- Respuesta de Chucky -->
+        <div style="margin-top:10px">
+          <div style="font-size:0.78rem;color:rgba(229,57,53,.8);margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em">Chucky respondió:</div>
+          <div id="chucky-response" style="font-size:0.92rem;color:#ff8a80;background:rgba(229,57,53,.07);border-radius:6px;padding:8px 10px;min-height:32px;font-style:italic;border:1px solid rgba(229,57,53,.2)">—</div>
+        </div>
+
+        <!-- Mandíbula -->
+        <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+          <span style="font-size:0.78rem;color:var(--text-dim);white-space:nowrap">Mandíbula:</span>
+          <div style="flex:1;height:6px;background:var(--border);border-radius:3px;position:relative">
+            <div id="chucky-jaw-fill" style="position:absolute;left:0;top:0;height:100%;width:0%;background:#e53935;border-radius:3px;transition:width .08s"></div>
+          </div>
+          <span id="chucky-jaw-angle" style="font-size:0.82rem;color:#e53935;min-width:32px;text-align:right">0°</span>
+        </div>
+
+        <!-- Hablar manualmente -->
+        <div style="margin-top:14px;display:flex;gap:8px">
+          <input id="chucky-manual-text" type="text" placeholder="Escribe algo y Chucky lo dice…"
+                 style="flex:1;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.88rem"
+                 onkeydown="if(event.key==='Enter')chuckySpeak()">
+          <button class="btn-emergency" style="font-size:0.82rem;padding:6px 12px;border-color:rgba(229,57,53,.5)"
+                  onclick="chuckySpeak()">Hablar</button>
+        </div>
+
+        <!-- Config: API key y palabras clave -->
+        <details style="margin-top:14px">
+          <summary style="font-size:0.82rem;color:var(--text-dim);cursor:pointer;user-select:none">⚙ Configuración</summary>
+          <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+            <label style="font-size:0.82rem;color:var(--text-dim)">
+              Groq API Key
+              <input id="chucky-api-key" type="password" placeholder="gsk_…"
+                     style="display:block;width:100%;margin-top:4px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.88rem">
+            </label>
+            <hr style="border:none;border-top:1px solid var(--border);margin:2px 0">
+            <div style="font-size:0.79rem;color:#e040fb;font-weight:600;letter-spacing:.5px">VOZ ORIGINAL DE CHUCKY</div>
+            <label style="font-size:0.82rem;color:var(--text-dim)">
+              ElevenLabs API Key
+              <input id="chucky-el-key" type="password" placeholder="sk_…"
+                     style="display:block;width:100%;margin-top:4px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.88rem">
+            </label>
+            <label style="font-size:0.82rem;color:var(--text-dim)">
+              ElevenLabs Voice ID
+              <input id="chucky-el-voice" type="text" placeholder="Busca 'Chucky' en elevenlabs.io/voice-library → pega el Voice ID"
+                     style="display:block;width:100%;margin-top:4px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.88rem">
+            </label>
+            <div id="chucky-tts-badge" style="font-size:0.78rem;padding:4px 8px;border-radius:4px;text-align:center;background:rgba(100,100,100,.15);color:var(--text-dim)">Motor TTS: cargando…</div>
+            <div style="display:flex;gap:8px">
+              <label style="flex:1;font-size:0.82rem;color:var(--text-dim)">
+                Palabra activadora
+                <input id="chucky-wake-word" type="text" value="andy"
+                       style="display:block;width:100%;margin-top:4px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.88rem">
+              </label>
+              <label style="flex:1;font-size:0.82rem;color:var(--text-dim)">
+                Palabra para terminar
+                <input id="chucky-end-word" type="text" value="adios"
+                       style="display:block;width:100%;margin-top:4px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:0.88rem">
+              </label>
+            </div>
+            <button class="btn-emergency" style="font-size:0.82rem;padding:7px;border-color:rgba(229,57,53,.5)"
+                    onclick="saveChuckyConfig()">Guardar configuración</button>
+            <div id="chucky-model-status" style="font-size:0.8rem;color:var(--text-dim);text-align:center;margin-top:4px"></div>
+            <button id="chucky-download-btn" class="btn-emergency" style="font-size:0.8rem;padding:6px;border-color:rgba(255,152,0,.5);background:rgba(255,152,0,.08);display:none"
+                    onclick="downloadChuckyModel()">⬇ Descargar modelo de voz (~39 MB)</button>
+          </div>
+        </details>
+      </div>
+
+      <!-- ════ FRASES AUTOMÁTICAS ════ -->
+      <div class="card" style="border-top:3px solid #7b1fa2 !important;margin-top:16px !important">
+        <div class="card-header" style="border-bottom:1px solid rgba(123,31,162,.25);padding-bottom:10px">
+          <span class="card-title" style="color:#ce93d8;font-size:1.05rem">🕯 Frases Automáticas</span>
+          <button id="auto-toggle-btn" class="btn-emergency"
+                  style="font-size:0.85rem;padding:6px 14px;border-color:rgba(123,31,162,.5);background:rgba(123,31,162,.12)"
+                  onclick="toggleAutoFrases()">▶ Iniciar</button>
+        </div>
+
+        <!-- Estado + intervalo -->
+        <div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
+          <div id="auto-status-dot" style="width:12px;height:12px;border-radius:50%;background:#555;flex-shrink:0"></div>
+          <span id="auto-status-txt" style="font-size:0.9rem;color:var(--text-dim)">Inactivo</span>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+            <label style="font-size:0.8rem;color:var(--text-dim);white-space:nowrap">Cada</label>
+            <input id="auto-interval" type="number" min="5" max="300" value="30"
+                   style="width:60px;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:5px 8px;font-size:0.88rem;text-align:center">
+            <span style="font-size:0.8rem;color:var(--text-dim)">seg</span>
+          </div>
+        </div>
+
+        <!-- Toggle voz aterradora -->
+        <div style="margin-top:10px;display:flex;align-items:center;gap:10px">
+          <input type="checkbox" id="scary-voice-cb" checked
+                 style="accent-color:#ce93d8;width:16px;height:16px"
+                 onchange="saveAutoConfig()">
+          <label for="scary-voice-cb" style="font-size:0.88rem;color:var(--text);cursor:pointer">
+            🎙 Voz grave aterradora activada
+          </label>
+        </div>
+
+        <!-- Frases personalizables -->
+        <details style="margin-top:12px">
+          <summary style="font-size:0.82rem;color:#ce93d8;cursor:pointer;user-select:none;padding:4px 0">
+            ✏️ Editar frases
+          </summary>
+          <div style="margin-top:8px">
+            <textarea id="auto-phrases-area" rows="8"
+                      style="width:100%;background:rgba(0,0,0,.25);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:0.82rem;resize:vertical;box-sizing:border-box;line-height:1.5"
+                      placeholder="Una frase por línea…"></textarea>
+            <button class="btn-emergency"
+                    style="margin-top:6px;width:100%;font-size:0.82rem;padding:7px;border-color:rgba(123,31,162,.5)"
+                    onclick="saveAutoConfig()">Guardar frases</button>
+          </div>
+        </details>
+      </div>
+      <!-- /frases automáticas -->
 
       <!-- Conexión Arduino -->
       <div class="card connection-card">
@@ -323,6 +516,15 @@
                 <input type="range" id="set-return-timeout" min="1" max="20" value="3"
                        oninput="updateSettingDisplay(this,'return-val',v=>v+'s')">
                 <span class="setting-value" id="return-val">3s</span>
+              </div>
+            </div>
+
+            <div class="setting-row">
+              <label title="Los ojos se adelantan al cuello por este tiempo (efecto depredador)">Retardo cuello (ms)</label>
+              <div class="setting-control">
+                <input type="range" id="set-eye-neck-delay" min="0" max="800" value="300"
+                       oninput="updateSettingDisplay(this,'eye-neck-delay-val',v=>v+'ms')">
+                <span class="setting-value" id="eye-neck-delay-val">300ms</span>
               </div>
             </div>
           </div>

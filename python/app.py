@@ -14,8 +14,11 @@ import threading
 import time
 import logging
 import json
+import socket
+import urllib.request
+import urllib.parse
 
-from flask import Flask, render_template, Response, jsonify, request, stream_with_context
+from flask import Flask, render_template, Response, jsonify, request, stream_with_context, send_file
 
 # Asegura que los módulos Python del proyecto sean importables
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +29,7 @@ from movement_controller import MovementController
 from gaze_tracking       import GazeTracker
 from motion_detection    import MotionDetector
 from camera              import CameraManager
+from chucky_voice        import ChuckyVoice
 
 # ----------------------------------------------------------------
 # Logging
@@ -51,6 +55,16 @@ app = Flask(
     static_folder=os.path.join(BASE_DIR, "..", "static"),
 )
 
+@app.after_request
+def add_no_cache(response):
+    """Evita que el navegador cachee la interfaz — siempre carga la versión más reciente."""
+    if response.content_type and "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
+
 # ----------------------------------------------------------------
 # Componentes del sistema
 # ----------------------------------------------------------------
@@ -60,11 +74,34 @@ gaze     = GazeTracker(cfg)
 motion   = MotionDetector(cfg)
 camera   = CameraManager(cfg)
 
+chucky = ChuckyVoice(serial, cfg)
+
 # Conectar cámara con procesadores y controlador de movimiento
 camera.gaze_tracker    = gaze
 camera.motion_detector = motion
 camera.on_gaze_position   = lambda angle: movement.set_target(angle, "gaze")
 camera.on_motion_position = lambda angle: movement.set_target(angle, "motion")
+
+# ----------------------------------------------------------------
+# Config persistente del usuario (guarda URL del ESP32, etc.)
+# ----------------------------------------------------------------
+_USER_CFG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "user_config.json")
+
+def _load_user_cfg() -> dict:
+    try:
+        with open(_USER_CFG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_user_cfg(data: dict):
+    try:
+        existing = _load_user_cfg()
+        existing.update(data)
+        with open(_USER_CFG_FILE, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+    except Exception as e:
+        logger.error("Error guardando user_config: %s", e)
 
 # ----------------------------------------------------------------
 # Registro de eventos (últimos 60)
@@ -95,12 +132,41 @@ def initialize():
     log_event("Iniciando sistema Animatrónico...")
 
     if serial.connect():
-        log_event(f"Arduino conectado en {cfg.SERIAL_PORT}", "success")
+        jaw_label = " + mandíbula" if not getattr(cfg, 'JAW_SERIAL_PORT', None) else ""
+        log_event(f"Arduino conectado en {cfg.SERIAL_PORT} (ojos/cuello{jaw_label})", "success")
     else:
         log_event(
             f"Arduino no encontrado en {cfg.SERIAL_PORT}. "
-            "El servo no responderá hasta que se conecte.", "warning"
+            "Los servos no responderán hasta que se conecte.", "warning"
         )
+
+    # Conectar Arduino de la boca (segundo puerto, si está configurado)
+    jaw_port = getattr(cfg, 'JAW_SERIAL_PORT', None)
+    if jaw_port:
+        # Esperar antes de abrir el segundo puerto para evitar interferencia DTR
+        time.sleep(3.0)
+        if serial.connect_jaw():
+            log_event(f"Arduino boca conectado en {jaw_port}", "success")
+        else:
+            log_event(
+                f"Arduino boca no encontrado en {jaw_port}. "
+                "La mandíbula no responderá.", "warning"
+            )
+
+    # Cargar config guardada (ESP32 URL, Groq API key, etc.)
+    saved = _load_user_cfg()
+    if saved.get("esp32_url"):
+        cfg.ESP32_CAMERA_URL = saved["esp32_url"]
+        logger.info("URL ESP32 cargada: %s", cfg.ESP32_CAMERA_URL)
+    if saved.get("groq_api_key"):
+        chucky.set_config(groq_key=saved["groq_api_key"])
+        logger.info("Groq API key cargada")
+    if saved.get("elevenlabs_api_key"):
+        chucky.set_config(elevenlabs_key=saved["elevenlabs_api_key"])
+        logger.info("ElevenLabs API key cargada")
+    if saved.get("elevenlabs_voice_id"):
+        chucky.set_config(elevenlabs_voice_id=saved["elevenlabs_voice_id"])
+        logger.info("ElevenLabs Voice ID cargado: %s", saved["elevenlabs_voice_id"])
 
     if camera.start():
         log_event(f"Cámara {cfg.CAMERA_INDEX} lista", "success")
@@ -138,11 +204,13 @@ def api_status():
         "camera": {
             "connected": camera.connected,
             "index": cfg.CAMERA_INDEX,
+            "esp32_url": getattr(cfg, "ESP32_CAMERA_URL", ""),
         },
         "movement": mv,
         "neck": {
             "angle": mv.get("neck_angle", 90),
             "sync": mv.get("neck_sync", True),
+            "mode": mv.get("neck_mode", "user"),
         },
         "gaze": gaze.get_state(),
         "motion": motion.get_state(),
@@ -165,7 +233,7 @@ def api_mode():
 
     ok = movement.set_mode(mode)
     if ok:
-        log_event(f"Modo → {mode}")
+        log_event(f"Modo: {mode}")
     return jsonify({"success": ok, "mode": mode})
 
 
@@ -214,6 +282,7 @@ def api_settings():
             "gaze_sensitivity":    cfg.GAZE_SENSITIVITY,
             "motion_min_area":     cfg.MOTION_MIN_AREA,
             "motion_return_timeout": cfg.MOTION_RETURN_TIMEOUT,
+            "eye_neck_delay_ms":    int(round(movement.eye_neck_delay * 1000)),
         })
 
     data = request.get_json(force=True)
@@ -343,54 +412,237 @@ def api_arduino_status():
 
 @app.route("/api/esp32_camera", methods=["GET", "POST"])
 def api_esp32_camera():
-    """Configura o consulta la fuente de cámara ESP32-CAM."""
+    """Configura o consulta la fuente de camara ESP32-CAM."""
     if request.method == "GET":
         url = getattr(cfg, "ESP32_CAMERA_URL", "")
         return jsonify({
             "url": url,
             "connected": camera.connected,
             "source": "esp32" if url else "local",
-            "source_label": url if url else f"Webcam local (índice {cfg.CAMERA_INDEX})",
+            "source_label": url if url else f"Webcam local (indice {cfg.CAMERA_INDEX})",
         })
 
     data = request.get_json(force=True)
     url = data.get("url", "").strip()
 
-    ok = camera.restart(url if url else None)
-    if ok:
-        source_label = f"ESP32: {url}" if url else "Webcam local"
-        log_event(f"Fuente de cámara → {source_label}", "success")
-        return jsonify({"success": True, "source": "esp32" if url else "local"})
+    if url:
+        cfg.ESP32_CAMERA_URL = url
+        _save_user_cfg({"esp32_url": url})
     else:
-        err = f"No se pudo conectar a {url}" if url else "No se pudo iniciar webcam"
-        log_event(err, "error")
-        return jsonify({"success": False, "error": err})
+        cfg.ESP32_CAMERA_URL = ""         # borrar URL al volver a webcam local
+        _save_user_cfg({"esp32_url": ""})
+
+    # Conectar en segundo plano para no bloquear Flask
+    def _connect():
+        ok = camera.restart(url if url else None)
+        label = f"ESP32: {url}" if url else "Webcam local"
+        if ok:
+            log_event(f"Camara conectada: {label}", "success")
+        else:
+            log_event(f"No se pudo conectar: {label}", "error")
+
+    threading.Thread(target=_connect, daemon=True, name="esp32-connect").start()
+    return jsonify({"success": True, "connecting": True})
 
 
-@app.route("/api/phone_frame", methods=["POST"])
-def api_phone_frame():
-    """Recibe un frame JPEG en base64 desde la cámara del teléfono y lo procesa."""
-    import base64
-    import numpy as np
-    import cv2
-
+@app.route("/api/esp32_wifi", methods=["POST"])
+def api_esp32_wifi():
+    """Envia nuevas credenciales WiFi al ESP32-CAM (requiere sketch actualizado)."""
     data = request.get_json(force=True)
-    frame_b64 = data.get("frame", "")
+    ssid     = data.get("ssid", "").strip()
+    password = data.get("password", "")
 
-    if "base64," in frame_b64:
-        frame_b64 = frame_b64.split("base64,", 1)[1]
+    if not ssid:
+        return jsonify({"success": False, "error": "SSID requerido"}), 400
+
+    esp32_url = getattr(cfg, "ESP32_CAMERA_URL", "")
+    if not esp32_url:
+        return jsonify({"success": False, "error": "Primero conecta el ESP32-CAM"}), 400
+
+    # Derivar URL base desde la URL del stream
+    base_url = esp32_url.split("/stream")[0].split("/capture")[0]
+    wifi_endpoint = f"{base_url}/wifi"
+
+    # Incluir la IP de Flask para que el ESP32 sepa donde avisar al reconectarse
+    # Usar la IP real de red (no localhost) para que el ESP32 pueda alcanzar Flask
+    try:
+        _s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        _s.connect(("8.8.8.8", 80))
+        _real_ip = _s.getsockname()[0]
+        _s.close()
+    except Exception:
+        _real_ip = request.host.split(":")[0]
+    flask_ip = f"{_real_ip}:5000"
+    body = urllib.parse.urlencode({"ssid": ssid, "pass": password, "flask": flask_ip}).encode()
+    req_obj = urllib.request.Request(wifi_endpoint, data=body, method="POST")
+    req_obj.add_header("Content-Type", "application/x-www-form-urlencoded")
 
     try:
-        img_bytes = base64.b64decode(frame_b64)
-        nparr = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if frame is None:
-            return jsonify({"error": "Frame inválido"}), 400
-        camera.inject_frame(frame)
-        return jsonify({"success": True})
+        resp = urllib.request.urlopen(req_obj, timeout=5)
+        resp.read()
+        _save_user_cfg({"esp32_ssid": ssid})
+        log_event(f"WiFi ESP32 actualizado: {ssid}", "success")
+        return jsonify({"success": True, "message": f"ESP32 reiniciando con red: {ssid}"})
     except Exception as e:
-        logger.error(f"Error en phone_frame: {e}")
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/esp32_announce", methods=["POST"])
+def api_esp32_announce():
+    """El ESP32 avisa su nueva IP tras reconectarse a una red WiFi."""
+    data = request.get_json(force=True)
+    ip   = data.get("ip", "").strip()
+    port = int(data.get("port", 81))
+
+    if not ip:
+        return jsonify({"success": False, "error": "IP requerida"}), 400
+
+    new_url = f"http://{ip}:{port}/stream"
+    cfg.ESP32_CAMERA_URL = new_url
+    _save_user_cfg({"esp32_url": new_url, "esp32_ip": ip})
+    log_event(f"ESP32 anuncio: nueva IP {ip} — stream: {new_url}", "success")
+
+    # Reconectar camara con la nueva URL en segundo plano
+    def _reconnect():
+        ok = camera.restart(new_url)
+        if ok:
+            log_event(f"Camara reconectada: {new_url}", "success")
+        else:
+            log_event(f"No se pudo reconectar camara: {new_url}", "error")
+    threading.Thread(target=_reconnect, daemon=True, name="esp32-reconnect").start()
+
+    return jsonify({"success": True, "url": new_url})
+
+
+
+# ================================================================
+# Rutas Chucky Parlante
+# ================================================================
+
+@app.route("/api/chucky/status")
+def chucky_status():
+    return jsonify(chucky.get_status())
+
+
+@app.route("/api/chucky/start", methods=["POST"])
+def chucky_start():
+    ok = chucky.start()
+    if ok:
+        log_event("Chucky Parlante: escuchando", "success")
+    return jsonify({"success": ok, "error": chucky.error_msg})
+
+
+@app.route("/api/chucky/stop", methods=["POST"])
+def chucky_stop():
+    chucky.stop()
+    log_event("Chucky Parlante: detenido")
+    return jsonify({"success": True})
+
+
+@app.route("/api/chucky/speak", methods=["POST"])
+def chucky_speak():
+    data = request.get_json(force=True)
+    texto = (data.get("text") or "").strip()
+    if not texto:
+        return jsonify({"error": "text requerido"}), 400
+    chucky.speak_text(texto)
+    log_event(f"Chucky dice: {texto[:60]}")
+    return jsonify({"success": True})
+
+
+@app.route("/api/chucky/config", methods=["POST"])
+def chucky_config():
+    data = request.get_json(force=True)
+    chucky.set_config(
+        groq_key            = data.get("groq_api_key"),
+        wake_word           = data.get("wake_word"),
+        end_word            = data.get("end_word"),
+        elevenlabs_key      = data.get("elevenlabs_api_key"),
+        elevenlabs_voice_id = data.get("elevenlabs_voice_id"),
+        elevenlabs_model    = data.get("elevenlabs_model"),
+    )
+    # Persistir claves API
+    save_data = {}
+    if data.get("groq_api_key") is not None:
+        save_data["groq_api_key"] = data["groq_api_key"]
+    if data.get("elevenlabs_api_key") is not None:
+        save_data["elevenlabs_api_key"] = data["elevenlabs_api_key"]
+    if data.get("elevenlabs_voice_id") is not None:
+        save_data["elevenlabs_voice_id"] = data["elevenlabs_voice_id"]
+    if save_data:
+        _save_user_cfg(save_data)
+    log_event("Config Chucky actualizada")
+    return jsonify({"success": True})
+
+
+@app.route("/api/chucky/auto_frases", methods=["GET", "POST"])
+def chucky_auto_frases():
+    if request.method == "GET":
+        return jsonify({
+            "auto_active":   chucky.auto_active,
+            "auto_interval": chucky.auto_interval,
+            "scary_voice":   chucky.scary_voice,
+            "auto_phrases":  chucky.auto_phrases,
+        })
+
+    data = request.get_json(force=True)
+    action = data.get("action")
+
+    if action == "start":
+        chucky.set_auto_config(
+            interval = data.get("interval"),
+            phrases  = data.get("phrases"),
+            scary    = data.get("scary_voice"),
+        )
+        ok = chucky.start_auto_phrases()
+        if ok:
+            log_event(f"Auto-frases iniciado (cada {chucky.auto_interval}s)", "success")
+        return jsonify({"success": True, "auto_active": chucky.auto_active})
+
+    elif action == "stop":
+        chucky.stop_auto_phrases()
+        log_event("Auto-frases detenido")
+        return jsonify({"success": True, "auto_active": False})
+
+    elif action == "config":
+        chucky.set_auto_config(
+            interval = data.get("interval"),
+            phrases  = data.get("phrases"),
+            scary    = data.get("scary_voice"),
+        )
+        log_event("Config auto-frases actualizada")
+        return jsonify({"success": True,
+                        "auto_interval": chucky.auto_interval,
+                        "scary_voice":   chucky.scary_voice})
+
+    return jsonify({"error": "Acción desconocida"}), 400
+
+
+@app.route("/api/chucky/download_model", methods=["POST"])
+def chucky_download_model():
+    if chucky.model_ready:
+        return jsonify({"success": True, "message": "Modelo ya listo"})
+    chucky.download_model()
+    return jsonify({"success": True, "message": "Descarga iniciada"})
+
+
+@app.route("/download_app")
+def download_app():
+    """Descarga el APK de Android para instalar en el teléfono."""
+    apk_candidates = [
+        os.path.normpath(os.path.join(BASE_DIR, "..", "..", "app_android", "ChuckyController.apk")),
+        r"C:\Users\mayum\Desktop\Chucky_Sistema\app_android\ChuckyController.apk",
+        r"C:\Users\mayum\Downloads\ChuckyController.apk",
+    ]
+    for apk_path in apk_candidates:
+        if os.path.exists(apk_path):
+            return send_file(
+                apk_path,
+                as_attachment=True,
+                download_name="ChuckyController.apk",
+                mimetype="application/vnd.android.package-archive"
+            )
+    return "APK no encontrado. Compila primero desde la PC.", 404
 
 
 @app.route("/sw.js")
@@ -410,16 +662,18 @@ def service_worker():
 def video_feed():
     def generate():
         last_jpeg = None
+        last_sent = None
         while True:
             jpeg = camera.get_jpeg(quality=70)
-            if jpeg:
+            if jpeg and jpeg is not last_jpeg:
                 last_jpeg = jpeg
-            if last_jpeg:
+            if last_jpeg and last_jpeg is not last_sent:
+                last_sent = last_jpeg
                 yield (
                     b"--frame\r\n"
                     b"Content-Type: image/jpeg\r\n\r\n" + last_jpeg + b"\r\n"
                 )
-            time.sleep(0.05)   # ~20 fps — reduce carga en el navegador
+            time.sleep(0.033)   # ~30 fps cap
 
     return Response(
         stream_with_context(generate()),
