@@ -88,7 +88,7 @@ class MainActivity : AppCompatActivity() {
                     if (!pageLoaded) {
                         view?.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
                     }
-                }, 10000)
+                }, 5000)
             }
             override fun onPageFinished(view: WebView?, url: String?) {
                 pageLoaded = true
@@ -103,7 +103,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl(getSavedUrl())
+        // Mostrar offline page inmediatamente — nunca pantalla en blanco/negro
+        // El usuario toca REINTENTAR para conectarse al servidor
+        webView.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
     }
 
     @Deprecated("Deprecated in Java")
