@@ -81,14 +81,15 @@ class MainActivity : AppCompatActivity() {
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                pageLoaded = false
-                // Timeout: si en 10s no carga, muestra página offline
-                handler.removeCallbacksAndMessages(null)
-                handler.postDelayed({
-                    if (!pageLoaded) {
-                        view?.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
-                    }
-                }, 5000)
+                if (url != null && !url.startsWith("data:")) {
+                    pageLoaded = false
+                    handler.removeCallbacksAndMessages(null)
+                    handler.postDelayed({
+                        if (!pageLoaded) {
+                            view?.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
+                        }
+                    }, 5000)
+                }
             }
             override fun onPageFinished(view: WebView?, url: String?) {
                 pageLoaded = true
@@ -103,15 +104,39 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Mostrar offline page inmediatamente — nunca pantalla en blanco/negro
-        // El usuario toca REINTENTAR para conectarse al servidor
-        webView.loadDataWithBaseURL(null, offlinePage(getSavedUrl()), "text/html", "UTF-8", null)
+        // Muestra pantalla de carga inmediatamente — nunca negro ni blanco
+        webView.loadDataWithBaseURL(null, loadingPage(getSavedUrl()), "text/html", "UTF-8", null)
+        // Luego intenta conectar al servidor
+        handler.postDelayed({ webView.loadUrl(getSavedUrl()) }, 800)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
+
+    private fun loadingPage(url: String) = """
+        <!DOCTYPE html><html><head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width,initial-scale=1.0">
+        <style>
+          body{background:#0a0c12;color:#e0e8f0;font-family:monospace;
+               display:flex;align-items:center;justify-content:center;
+               min-height:100vh;margin:0;flex-direction:column;gap:20px;text-align:center;padding:28px}
+          h2{color:#00d4ff;margin:0;font-size:1.3rem;letter-spacing:2px}
+          p{color:#6a7a90;font-size:.8rem;margin:0}
+          .spinner{width:60px;height:60px;border:4px solid rgba(0,212,255,.2);
+                   border-top:4px solid #00d4ff;border-radius:50%;
+                   animation:spin 1s linear infinite}
+          @keyframes spin{to{transform:rotate(360deg)}}
+          .url{color:#00d4ff;font-size:.75rem;opacity:.7;word-break:break-all;max-width:280px}
+        </style></head><body>
+        <div class="spinner"></div>
+        <h2>CONECTANDO...</h2>
+        <p>Buscando el servidor de Chucky</p>
+        <div class="url">$url</div>
+        </body></html>
+    """.trimIndent()
 
     private fun offlinePage(url: String) = """
         <!DOCTYPE html><html><head>
