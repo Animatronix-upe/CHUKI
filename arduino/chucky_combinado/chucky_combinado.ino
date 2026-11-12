@@ -1,7 +1,6 @@
 /*
   chucky_combinado.ino
   Un solo Arduino controla: ojos, cuello, mandíbula y LEDs.
-  Elimina el problema de interferencia DTR entre dos Arduinos.
 
   Conexiones:
     Pin 9  → Servo OJOS   (SG90)
@@ -10,15 +9,18 @@
     Pin 12 → LEDs ojos (con resistencia 220Ω)
 
   Protocolo serie (9600 baud):
-    POS,90      → mover servo ojos a 90°
+    POS,55      → mover servo ojos a 55°
     NECK,55     → mover servo cuello a 55°
     JAW,45      → mover mandíbula a 45°
     LED,1       → encender LEDs
     LED,0       → apagar LEDs
-    CENTER      → centrar ojos y cuello
+    CENTER      → centrar ojos y cuello (55°)
     STOP        → detener (mantener posición actual)
     PING        → responde PONG
     STATUS      → responde POS,<angulo_ojos>
+
+  Movimiento: suave y no bloqueante — el loop mueve 1° cada VELOCIDAD ms,
+  nunca bloquea el serial.
 */
 
 #include <Servo.h>
@@ -35,15 +37,28 @@ const int PIN_LED        = 12;
 const int CENTRO_OJOS    = 55;
 const int CENTRO_CUELLO  = 55;
 
-int anguloOjos      = 55;
-int anguloCuello    = 55;
+// Velocidad suave: 1 grado cada N milisegundos
+const int VELOCIDAD = 8;
+
+// Posiciones actuales y objetivos
+int anguloOjos      = CENTRO_OJOS;
+int anguloCuello    = CENTRO_CUELLO;
 int anguloMandibula = 0;
+
+int targetOjos      = CENTRO_OJOS;
+int targetCuello    = CENTRO_CUELLO;
+int targetMandibula = 0;
+
+// Control de tiempo para movimiento suave no bloqueante
+unsigned long ultimoMovOjos    = 0;
+unsigned long ultimoMovCuello  = 0;
+unsigned long ultimoMovMandib  = 0;
 
 String inputBuffer = "";
 
 void setup() {
   Serial.begin(9600);
-  Serial.setTimeout(50);   // ← clave: parseInt() espera solo 50ms (no 1000ms)
+  Serial.setTimeout(50);
 
   servoOjos.attach(PIN_OJOS);
   servoCuello.attach(PIN_CUELLO);
@@ -61,6 +76,28 @@ void setup() {
 }
 
 void loop() {
+  unsigned long ahora = millis();
+
+  // --- Movimiento suave no bloqueante ---
+  if (anguloOjos != targetOjos && ahora - ultimoMovOjos >= VELOCIDAD) {
+    anguloOjos += (anguloOjos < targetOjos) ? 1 : -1;
+    servoOjos.write(anguloOjos);
+    ultimoMovOjos = ahora;
+  }
+
+  if (anguloCuello != targetCuello && ahora - ultimoMovCuello >= VELOCIDAD) {
+    anguloCuello += (anguloCuello < targetCuello) ? 1 : -1;
+    servoCuello.write(anguloCuello);
+    ultimoMovCuello = ahora;
+  }
+
+  if (anguloMandibula != targetMandibula && ahora - ultimoMovMandib >= (VELOCIDAD / 2)) {
+    anguloMandibula += (anguloMandibula < targetMandibula) ? 1 : -1;
+    servoMandibula.write(anguloMandibula);
+    ultimoMovMandib = ahora;
+  }
+
+  // --- Lectura serial ---
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
@@ -70,7 +107,7 @@ void loop() {
       }
     } else {
       inputBuffer += c;
-      if (inputBuffer.length() > 32) inputBuffer = "";  // protección overflow
+      if (inputBuffer.length() > 32) inputBuffer = "";
     }
   }
 }
@@ -84,15 +121,15 @@ void procesarComando(String cmd) {
   }
 
   if (cmd == "CENTER") {
-    anguloOjos   = CENTRO_OJOS;
-    anguloCuello = CENTRO_CUELLO;
-    servoOjos.write(anguloOjos);
-    servoCuello.write(anguloCuello);
+    targetOjos   = CENTRO_OJOS;
+    targetCuello = CENTRO_CUELLO;
     Serial.println("OK");
     return;
   }
 
   if (cmd == "STOP") {
+    targetOjos   = anguloOjos;
+    targetCuello = anguloCuello;
     Serial.println("OK");
     return;
   }
@@ -105,25 +142,19 @@ void procesarComando(String cmd) {
 
   if (cmd.startsWith("POS,")) {
     int ang = cmd.substring(4).toInt();
-    ang = constrain(ang, 0, 180);
-    anguloOjos = ang;
-    servoOjos.write(anguloOjos);
+    targetOjos = constrain(ang, 0, 110);
     return;
   }
 
   if (cmd.startsWith("NECK,")) {
     int ang = cmd.substring(5).toInt();
-    ang = constrain(ang, 0, 110);
-    anguloCuello = ang;
-    servoCuello.write(anguloCuello);
+    targetCuello = constrain(ang, 0, 110);
     return;
   }
 
   if (cmd.startsWith("JAW,")) {
     int ang = cmd.substring(4).toInt();
-    ang = constrain(ang, 0, 90);
-    anguloMandibula = ang;
-    servoMandibula.write(anguloMandibula);
+    targetMandibula = constrain(ang, 0, 90);
     return;
   }
 
@@ -135,8 +166,7 @@ void procesarComando(String cmd) {
   }
 
   if (cmd == "NECK_CENTER") {
-    anguloCuello = CENTRO_CUELLO;
-    servoCuello.write(anguloCuello);
+    targetCuello = CENTRO_CUELLO;
     return;
   }
 }
