@@ -32,11 +32,11 @@ const int PIN_CUELLO     = 10;
 const int PIN_MANDIBULA  = 11;
 const int PIN_LED        = 12;
 
-const int CENTRO_OJOS    = 90;
+const int CENTRO_OJOS    = 55;
 const int CENTRO_CUELLO  = 55;
 
-int anguloOjos      = CENTRO_OJOS;
-int anguloCuello    = CENTRO_CUELLO;
+int anguloOjos      = 55;
+int anguloCuello    = 55;
 int anguloMandibula = 0;
 
 String inputBuffer = "";

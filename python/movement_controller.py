@@ -151,11 +151,19 @@ class MovementController:
     def center(self):
         """Centra ojos y cuello inmediatamente."""
         center = float(self.config.SERVO_CENTER_ANGLE)
+        center_int = int(round(center))
+        neck_center = float(getattr(self.config, 'NECK_CENTER_ANGLE', center))
+        neck_center_int = int(round(neck_center))
         with self._lock:
             self.target_angle = center
-            self.neck_target  = center
+            self.current_angle = center
+            self._last_sent_angle = center_int - 999  # fuerza re-envío
+            self.neck_target = neck_center
+            self.current_neck_angle = neck_center
+            self._last_sent_neck = neck_center_int - 999
             self._last_target_time = time.time()
-        self.serial.send_center()
+        self.serial.send_position(center_int)
+        self.serial.send_neck_position(neck_center_int)
 
     def stop(self):
         """Parada de emergencia: detiene ojos y cuello."""

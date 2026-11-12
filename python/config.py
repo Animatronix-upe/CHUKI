@@ -17,7 +17,7 @@ import os
 #   Pin 12 → LEDs ojos
 # Hardware: Arduino UNO R3 — UN SOLO ARDUINO en COM14
 # [PROVISIONAL] Identifica tu puerto en Arduino IDE > Herramientas > Puerto
-SERIAL_PORT     = "COM14"   # Arduino combinado (ojos + cuello + mandíbula + LEDs)
+SERIAL_PORT     = "COM16"   # Arduino combinado (ojos + cuello + mandíbula + LEDs)
 JAW_SERIAL_PORT = ""        # Vacío = usar el puerto principal (sketch combinado)
 SERIAL_BAUDRATE = 9600
 SERIAL_TIMEOUT = 1.0        # segundos de espera en lectura
