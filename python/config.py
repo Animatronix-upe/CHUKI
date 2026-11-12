@@ -31,7 +31,7 @@ NECK_MAX_ANGLE    = 110  # CabezaOficial: ANGULO_DER
 NECK_CENTER_ANGLE = 55   # CabezaOficial: CENTRO
 NECK_SYNC_WITH_EYES = True
 NECK_INVERT       = False
-NECK_SMOOTHING_FACTOR = 0.88   # 0.0=sin suavizado, 0.95=muy lento — más alto que ojos
+NECK_SMOOTHING_FACTOR = 0.70   # 0.0=sin suavizado, 0.95=muy lento — más alto que ojos
 NECK_MIN_MOVEMENT = 2          # Grados mínimos para enviar nuevo comando al cuello
 NECK_DELAY_MS     = 300        # ms que los ojos se adelantan al cuello (efecto depredador)
 
@@ -60,10 +60,10 @@ ESP32_CAMERA_URL = ""
 # MANTÉN estos límites conservadores hasta verificar que el mecanismo
 # no choca en los extremos. Amplía de 5 en 5 grados desde la web (Ajustes).
 SERVO_MIN_ANGLE = 0      # Tope físico izquierdo del SG90
-SERVO_MAX_ANGLE = 180    # Tope físico derecho  del SG90
-SERVO_CENTER_ANGLE = 90  # Posición central (ojos al frente)
-SERVO_LEFT_ANGLE = 5     # Posición izquierda para seguimiento
-SERVO_RIGHT_ANGLE = 175  # Posición derecha para seguimiento
+SERVO_MAX_ANGLE = 110    # Tope físico derecho  del SG90
+SERVO_CENTER_ANGLE = 55  # Posición central (ojos al frente)
+SERVO_LEFT_ANGLE = 0     # Posición izquierda para seguimiento
+SERVO_RIGHT_ANGLE = 110  # Posición derecha para seguimiento
 
 # ================================================================
 # LEDs DE LOS OJOS
