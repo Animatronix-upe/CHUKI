@@ -367,6 +367,19 @@
                   onclick="chuckySpeak()">Hablar</button>
         </div>
 
+        <!-- Micrófono web (Opción B) -->
+        <div style="margin-top:12px">
+          <div style="font-size:0.78rem;color:rgba(229,57,53,.7);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">🎤 Hablar desde este dispositivo</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button id="web-mic-btn"
+                    onclick="toggleWebMic()"
+                    style="flex:1;padding:11px;border-radius:8px;font-size:0.9rem;cursor:pointer;font-family:monospace;letter-spacing:1px;border:1.5px solid rgba(229,57,53,.5);background:rgba(229,57,53,.1);color:#ff8a80;transition:all .2s">
+              🎙 MANTÉN PRESIONADO PARA HABLAR
+            </button>
+          </div>
+          <div id="web-mic-status" style="font-size:0.78rem;color:var(--text-dim);margin-top:5px;text-align:center;min-height:18px"></div>
+        </div>
+
         <!-- Config: API key y palabras clave -->
         <details style="margin-top:14px">
           <summary style="font-size:0.82rem;color:var(--text-dim);cursor:pointer;user-select:none">⚙ Configuración</summary>

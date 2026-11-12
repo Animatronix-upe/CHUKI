@@ -626,6 +626,43 @@ def chucky_download_model():
     return jsonify({"success": True, "message": "Descarga iniciada"})
 
 
+@app.route("/api/voice_chat", methods=["POST"])
+def voice_chat():
+    """Recibe texto transcrito desde el navegador, responde con Groq + ElevenLabs.
+    Devuelve MP3 al cliente Y reproduce en los parlantes de la PC."""
+    data  = request.get_json(force=True)
+    texto = (data.get("text") or "").strip()
+    if not texto:
+        return jsonify({"error": "text requerido"}), 400
+
+    respuesta = chucky._conversar(texto)
+    if not respuesta:
+        return jsonify({"error": "Sin respuesta de Groq"}), 500
+
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        mp3_path = f.name
+
+    if chucky.elevenlabs_api_key:
+        chucky._tts_elevenlabs(respuesta, mp3_path)
+    else:
+        chucky._tts_gtts(respuesta, mp3_path)
+
+    # Reproducir en la PC en segundo plano
+    def _play_pc():
+        try:
+            if chucky._pygame_ready:
+                import pygame
+                with chucky._speak_lock:
+                    pygame.mixer.music.load(mp3_path)
+                    pygame.mixer.music.play()
+        except Exception as exc:
+            logger.warning("voice_chat PC play: %s", exc)
+    threading.Thread(target=_play_pc, daemon=True).start()
+
+    log_event(f"[Web mic] {texto[:50]} → {respuesta[:50]}")
+    return send_file(mp3_path, mimetype="audio/mpeg", as_attachment=False)
+
+
 @app.route("/download_app")
 def download_app():
     """Descarga el APK de Android para instalar en el teléfono."""

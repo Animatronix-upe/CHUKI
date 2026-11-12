@@ -937,6 +937,103 @@ async function saveAutoConfig() {
   });
 })();
 
+// ================================================================
+// MICRÓFONO WEB — Hablar con Chucky desde el navegador/celular
+// Usa Web Speech API para transcribir en el navegador, luego
+// envía el texto al servidor para respuesta Groq + audio ElevenLabs
+// ================================================================
+(function() {
+  let _recognition = null;
+  let _listening   = false;
+
+  function _micStatus(msg, color) {
+    const el = document.getElementById('web-mic-status');
+    if (el) { el.textContent = msg; el.style.color = color || 'var(--text-dim)'; }
+  }
+
+  function _micBtn(active) {
+    const btn = document.getElementById('web-mic-btn');
+    if (!btn) return;
+    if (active) {
+      btn.textContent = '🔴 ESCUCHANDO… (suelta para enviar)';
+      btn.style.background = 'rgba(229,57,53,.35)';
+      btn.style.borderColor = '#e53935';
+      btn.style.color = '#fff';
+    } else {
+      btn.textContent = '🎙 MANTÉN PRESIONADO PARA HABLAR';
+      btn.style.background = 'rgba(229,57,53,.1)';
+      btn.style.borderColor = 'rgba(229,57,53,.5)';
+      btn.style.color = '#ff8a80';
+    }
+  }
+
+  async function _sendToChucky(texto) {
+    if (!texto.trim()) return;
+    _micStatus('Enviando: "' + texto.slice(0, 40) + '"…', '#00d4ff');
+    try {
+      const resp = await fetch('/api/voice_chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: texto })
+      });
+      if (!resp.ok) { _micStatus('Error del servidor', '#ff5252'); return; }
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play();
+      _micStatus('✓ Chucky responde…', '#4caf50');
+      audio.onended = () => { URL.revokeObjectURL(url); _micStatus(''); };
+    } catch(e) {
+      _micStatus('Error: ' + e.message, '#ff5252');
+    }
+  }
+
+  function _initRecognition() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      _micStatus('Tu navegador no soporta reconocimiento de voz', '#ff5252');
+      return null;
+    }
+    const r = new SR();
+    r.lang = 'es-MX';
+    r.interimResults = false;
+    r.maxAlternatives = 1;
+    r.onresult = (e) => {
+      const texto = e.results[0][0].transcript;
+      _micStatus('"' + texto + '"', '#e0e8f0');
+      _sendToChucky(texto);
+    };
+    r.onerror = (e) => { _micStatus('Error mic: ' + e.error, '#ff5252'); };
+    r.onend   = () => { _listening = false; _micBtn(false); };
+    return r;
+  }
+
+  window.toggleWebMic = function() {
+    if (_listening) {
+      _recognition && _recognition.stop();
+      _listening = false; _micBtn(false);
+      return;
+    }
+    _recognition = _initRecognition();
+    if (!_recognition) return;
+    try {
+      _recognition.start();
+      _listening = true; _micBtn(true);
+      _micStatus('Habla ahora…', '#ffaa00');
+    } catch(e) {
+      _micStatus('No se pudo iniciar el mic', '#ff5252');
+    }
+  };
+
+  // Soporte para mantener presionado (touch y mouse)
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('web-mic-btn');
+    if (!btn) return;
+    // Click simple también funciona como toggle
+    // Sin cambios adicionales necesarios (ya usa onclick)
+  });
+})();
+
 // Cargar estado al abrir la página
 (async function _initAutoFrases() {
   await _loadAutoFrasesUI();
