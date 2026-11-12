@@ -29,7 +29,6 @@ from movement_controller import MovementController
 from gaze_tracking       import GazeTracker
 from motion_detection    import MotionDetector
 from camera              import CameraManager
-from chucky_voice        import ChuckyVoice
 
 # ----------------------------------------------------------------
 # Logging
@@ -73,8 +72,6 @@ movement = MovementController(cfg, serial)
 gaze     = GazeTracker(cfg)
 motion   = MotionDetector(cfg)
 camera   = CameraManager(cfg)
-
-chucky = ChuckyVoice(serial, cfg)
 
 # Conectar cámara con procesadores y controlador de movimiento
 camera.gaze_tracker    = gaze
@@ -140,33 +137,11 @@ def initialize():
             "Los servos no responderán hasta que se conecte.", "warning"
         )
 
-    # Conectar Arduino de la boca (segundo puerto, si está configurado)
-    jaw_port = getattr(cfg, 'JAW_SERIAL_PORT', None)
-    if jaw_port:
-        # Esperar antes de abrir el segundo puerto para evitar interferencia DTR
-        time.sleep(3.0)
-        if serial.connect_jaw():
-            log_event(f"Arduino boca conectado en {jaw_port}", "success")
-        else:
-            log_event(
-                f"Arduino boca no encontrado en {jaw_port}. "
-                "La mandíbula no responderá.", "warning"
-            )
-
-    # Cargar config guardada (ESP32 URL, Groq API key, etc.)
+    # Cargar config guardada (ESP32 URL)
     saved = _load_user_cfg()
     if saved.get("esp32_url"):
         cfg.ESP32_CAMERA_URL = saved["esp32_url"]
         logger.info("URL ESP32 cargada: %s", cfg.ESP32_CAMERA_URL)
-    if saved.get("groq_api_key"):
-        chucky.set_config(groq_key=saved["groq_api_key"])
-        logger.info("Groq API key cargada")
-    if saved.get("elevenlabs_api_key"):
-        chucky.set_config(elevenlabs_key=saved["elevenlabs_api_key"])
-        logger.info("ElevenLabs API key cargada")
-    if saved.get("elevenlabs_voice_id"):
-        chucky.set_config(elevenlabs_voice_id=saved["elevenlabs_voice_id"])
-        logger.info("ElevenLabs Voice ID cargado: %s", saved["elevenlabs_voice_id"])
 
     if camera.start():
         log_event(f"Cámara {cfg.CAMERA_INDEX} lista", "success")
@@ -513,154 +488,6 @@ def api_esp32_announce():
 
     return jsonify({"success": True, "url": new_url})
 
-
-
-# ================================================================
-# Rutas Chucky Parlante
-# ================================================================
-
-@app.route("/api/chucky/status")
-def chucky_status():
-    return jsonify(chucky.get_status())
-
-
-@app.route("/api/chucky/start", methods=["POST"])
-def chucky_start():
-    ok = chucky.start()
-    if ok:
-        log_event("Chucky Parlante: escuchando", "success")
-    return jsonify({"success": ok, "error": chucky.error_msg})
-
-
-@app.route("/api/chucky/stop", methods=["POST"])
-def chucky_stop():
-    chucky.stop()
-    log_event("Chucky Parlante: detenido")
-    return jsonify({"success": True})
-
-
-@app.route("/api/chucky/speak", methods=["POST"])
-def chucky_speak():
-    data = request.get_json(force=True)
-    texto = (data.get("text") or "").strip()
-    if not texto:
-        return jsonify({"error": "text requerido"}), 400
-    chucky.speak_text(texto)
-    log_event(f"Chucky dice: {texto[:60]}")
-    return jsonify({"success": True})
-
-
-@app.route("/api/chucky/config", methods=["POST"])
-def chucky_config():
-    data = request.get_json(force=True)
-    chucky.set_config(
-        groq_key            = data.get("groq_api_key"),
-        wake_word           = data.get("wake_word"),
-        end_word            = data.get("end_word"),
-        elevenlabs_key      = data.get("elevenlabs_api_key"),
-        elevenlabs_voice_id = data.get("elevenlabs_voice_id"),
-        elevenlabs_model    = data.get("elevenlabs_model"),
-    )
-    # Persistir claves API
-    save_data = {}
-    if data.get("groq_api_key") is not None:
-        save_data["groq_api_key"] = data["groq_api_key"]
-    if data.get("elevenlabs_api_key") is not None:
-        save_data["elevenlabs_api_key"] = data["elevenlabs_api_key"]
-    if data.get("elevenlabs_voice_id") is not None:
-        save_data["elevenlabs_voice_id"] = data["elevenlabs_voice_id"]
-    if save_data:
-        _save_user_cfg(save_data)
-    log_event("Config Chucky actualizada")
-    return jsonify({"success": True})
-
-
-@app.route("/api/chucky/auto_frases", methods=["GET", "POST"])
-def chucky_auto_frases():
-    if request.method == "GET":
-        return jsonify({
-            "auto_active":   chucky.auto_active,
-            "auto_interval": chucky.auto_interval,
-            "scary_voice":   chucky.scary_voice,
-            "auto_phrases":  chucky.auto_phrases,
-        })
-
-    data = request.get_json(force=True)
-    action = data.get("action")
-
-    if action == "start":
-        chucky.set_auto_config(
-            interval = data.get("interval"),
-            phrases  = data.get("phrases"),
-            scary    = data.get("scary_voice"),
-        )
-        ok = chucky.start_auto_phrases()
-        if ok:
-            log_event(f"Auto-frases iniciado (cada {chucky.auto_interval}s)", "success")
-        return jsonify({"success": True, "auto_active": chucky.auto_active})
-
-    elif action == "stop":
-        chucky.stop_auto_phrases()
-        log_event("Auto-frases detenido")
-        return jsonify({"success": True, "auto_active": False})
-
-    elif action == "config":
-        chucky.set_auto_config(
-            interval = data.get("interval"),
-            phrases  = data.get("phrases"),
-            scary    = data.get("scary_voice"),
-        )
-        log_event("Config auto-frases actualizada")
-        return jsonify({"success": True,
-                        "auto_interval": chucky.auto_interval,
-                        "scary_voice":   chucky.scary_voice})
-
-    return jsonify({"error": "Acción desconocida"}), 400
-
-
-@app.route("/api/chucky/download_model", methods=["POST"])
-def chucky_download_model():
-    if chucky.model_ready:
-        return jsonify({"success": True, "message": "Modelo ya listo"})
-    chucky.download_model()
-    return jsonify({"success": True, "message": "Descarga iniciada"})
-
-
-@app.route("/api/voice_chat", methods=["POST"])
-def voice_chat():
-    """Recibe texto transcrito desde el navegador, responde con Groq + ElevenLabs.
-    Devuelve MP3 al cliente Y reproduce en los parlantes de la PC."""
-    data  = request.get_json(force=True)
-    texto = (data.get("text") or "").strip()
-    if not texto:
-        return jsonify({"error": "text requerido"}), 400
-
-    respuesta = chucky._conversar(texto)
-    if not respuesta:
-        return jsonify({"error": "Sin respuesta de Groq"}), 500
-
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        mp3_path = f.name
-
-    if chucky.elevenlabs_api_key:
-        chucky._tts_elevenlabs(respuesta, mp3_path)
-    else:
-        chucky._tts_gtts(respuesta, mp3_path)
-
-    # Reproducir en la PC en segundo plano
-    def _play_pc():
-        try:
-            if chucky._pygame_ready:
-                import pygame
-                with chucky._speak_lock:
-                    pygame.mixer.music.load(mp3_path)
-                    pygame.mixer.music.play()
-        except Exception as exc:
-            logger.warning("voice_chat PC play: %s", exc)
-    threading.Thread(target=_play_pc, daemon=True).start()
-
-    log_event(f"[Web mic] {texto[:50]} → {respuesta[:50]}")
-    return send_file(mp3_path, mimetype="audio/mpeg", as_attachment=False)
 
 
 @app.route("/download_app")
